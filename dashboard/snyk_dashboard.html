@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Snyk Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #38bdf8;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        canvas {
+            max-height: 300px;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        li {
+            padding: 5px 0;
+            border-bottom: 1px solid #334155;
+        }
+    </style>
+</head>
+<body>
+
+<h1>🔐 Snyk Security Dashboard</h1>
+<p id="repoLabel">Cargando...</p>
+<h2>Total Findings: <span id="totalFindings">0</span></h2>
+
+<div class="container">
+    <div class="card">
+        <h3>Severidad</h3>
+        <canvas id="severityChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>Tipo de Scan</h3>
+        <canvas id="scanTypeChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>SCA Severidad</h3>
+        <canvas id="scaChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>Code Severidad</h3>
+        <canvas id="codeChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>Top Proyectos</h3>
+        <ul id="topProjects"></ul>
+    </div>
+</div>
+
+<script>
+async function loadData() {
+    const response = await fetch('snyk_dashboard_data.json?t=' + Date.now());
+    const data = await response.json();
+
+    const topProject = data.top_projects && data.top_projects.length
+        ? data.top_projects[0].project_name
+        : null;
+
+    document.getElementById('repoLabel').textContent = topProject
+        ? 'Proyecto principal: ' + topProject
+        : 'Vista: Portafolio completo';
+
+    document.getElementById('totalFindings').textContent = data.total_findings ?? 0;
+
+    makeDoughnutChart('severityChart', data.severity || {});
+    makeDoughnutChart('scanTypeChart', data.scan_type || {});
+    makeBarChart('scaChart', data.sca_severity || {});
+    makeBarChart('codeChart', data.code_severity || {});
+
+    const list = document.getElementById('topProjects');
+    list.innerHTML = '';
+
+    (data.top_projects || []).forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = `${item.project_name}: ${item.total}`;
+        list.appendChild(li);
+    });
+}
+
+function makeDoughnutChart(id, dataset) {
+    const ctx = document.getElementById(id);
+    new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: Object.keys(dataset || {}),
+            datasets: [{
+                data: Object.values(dataset || {})
+            }]
+        }
+    });
+}
+
+function makeBarChart(id, dataset) {
+    const ctx = document.getElementById(id);
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(dataset || {}),
+            datasets: [{
+                data: Object.values(dataset || {})
+            }]
+        }
+    });
+}
+
+loadData();
+</script>
+
+</body>
+</html>

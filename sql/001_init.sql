@@ -1,0 +1,19 @@
+CREATE TABLE IF NOT EXISTS collector_runs (
+    id BIGSERIAL PRIMARY KEY,
+    module_name VARCHAR(50) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP NULL,
+    message TEXT NULL
+);
+
+CREATE TABLE IF NOT EXISTS assets (
+    id BIGSERIAL PRIMARY KEY,
+    asset_name VARCHAR(255) NOT NULL,
+    asset_type VARCHAR(50) NULL,
+    ip_address VARCHAR(100) NULL,
+    hostname VARCHAR(255) NULL,
+    source_module VARCHAR(50) NULL,
+    first_seen TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

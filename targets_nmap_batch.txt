@@ -1,0 +1,25 @@
+# nombre|target|perfil|enabled
+
+# Producción
+fw-principal|10.1.108.10|perimeter|true
+web-publico|mipacifica.com|vuln|true
+host-cpanel|162.241.103.113|vuln|true
+host-db|162.240.151.176|full_tcp|true
+
+# pruebas
+lab-1|192.168.1.50|quick|true
+lab-2|192.168.108.11|quick|true
+lab-3|192.168.108.13|quick|false
+switch-test|10.1.108.11|quick|true
+srv-test-1|10.42.100.11|quick|true
+srv-test-2|10.42.100.12|quick|true
+
+# red interna
+host-21|10.1.108.21|quick|true
+host-31|10.1.108.31|quick|true
+host-32|10.1.108.32|quick|true
+host-33|10.1.108.33|quick|true
+host-40|10.1.108.40|quick|true
+host-41|10.1.108.41|quick|true
+host-42|10.1.108.42|quick|true
+host-43|10.1.108.43|quick|true

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>Leviathan SOC</title>
+    <style>
+        body {
+          margin: 0;
+          font-family: Arial, sans-serif;
+          background: #081224;
+          color: #fff;
+          padding: 40px;
+        }
+        h1 {
+          margin-bottom: 30px;
+        }
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+          gap: 20px;
+        }
+        .card {
+          background: #10203d;
+          border-radius: 16px;
+          padding: 24px;
+          box-shadow: 0 8px 24px rgba(0,0,0,.25);
+        }
+        .card a {
+          color: #fff;
+          text-decoration: none;
+          font-size: 1.2rem;
+          font-weight: bold;
+        }
+        .card p {
+          color: #b8c4d9;
+        }
+    </style>
+</head>
+<body>
+<h1>Leviathan SOC Dashboard</h1>
+<div class="grid">
+    <div class="card">
+        <a href="snyk_dashboard.html">Dashboard Snyk</a>
+        <p>Vulnerabilidades de código y dependencias.</p>
+    </div>
+    <div class="card">
+        <a href="sentinel_dashboard_simple.html">Dashboard Sentinel</a>
+        <p>Incidentes y visibilidad de endpoints.</p>
+    </div>
+    <div class="card">
+        <a href="nmap_dashboard.html">Dashboard Nmap</a>
+        <p>Activos, servicios y hallazgos de red.</p>
+    </div>
+</div>
+</body>
+</html>
