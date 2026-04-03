@@ -1,37 +1,117 @@
 version: "3.9"
 
+# =============================================================================
+# SOC Platform - Docker Compose
+#
+# FASE ACTUAL:  Solo PostgreSQL corre en Docker.
+#               La app Python corre en venv local.
+#
+# FASE FUTURA:  Descomentar el servicio "app" para conteneirizar todo
+#               y agregar el servicio "frontend" cuando esté listo.
+# =============================================================================
+
 services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — base de datos principal del SOC
+  # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:16
+    image: postgres:16-alpine
     container_name: soc_postgres
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5433:5432"
+      - "${DB_PORT_HOST:-5433}:5432"   # Puerto externo configurable, interno siempre 5432
     volumes:
-      - soc_postgres_data:/var/lib/postgresql/data
-      - ./sql:/docker-entrypoint-initdb.d:ro
+      - soc_postgres_data:/var/lib/postgresql/data     # Datos persistentes
+      - ./sql:/docker-entrypoint-initdb.d:ro           # Migrations auto-ejecutadas al crear la DB
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 20s
+    networks:
+      - soc_net
 
+  # ---------------------------------------------------------------------------
+  # pgAdmin — interfaz web para inspeccionar PostgreSQL
+  # Acceso: http://localhost:8080
+  # ---------------------------------------------------------------------------
   pgadmin:
     image: dpage/pgadmin4:8
     container_name: soc_pgadmin
     restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@soc.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-socadmin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
     ports:
       - "8080:80"
+    volumes:
+      - soc_pgadmin_data:/var/lib/pgadmin
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - soc_net
 
+  # ---------------------------------------------------------------------------
+  # APP — contenedor Python (FASE FUTURA - descomentar cuando esté listo)
+  # ---------------------------------------------------------------------------
+  # app:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: soc_app
+  #   restart: unless-stopped
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     DB_HOST: postgres          # Dentro de Docker la DB es accesible por nombre de servicio
+  #     DB_PORT: 5432
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./dashboard:/app/dashboard
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   networks:
+  #     - soc_net
+
+  # ---------------------------------------------------------------------------
+  # FRONTEND — servidor web (FASE FUTURA)
+  # ---------------------------------------------------------------------------
+  # frontend:
+  #   image: nginx:alpine
+  #   container_name: soc_frontend
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./dashboard:/usr/share/nginx/html:ro
+  #   networks:
+  #     - soc_net
+
+# =============================================================================
+# Volúmenes persistentes
+# =============================================================================
 volumes:
   soc_postgres_data:
+    driver: local
+  soc_pgadmin_data:
+    driver: local
+
+# =============================================================================
+# Red interna del SOC
+# =============================================================================
+networks:
+  soc_net:
+    driver: bridge
+    name: soc_network

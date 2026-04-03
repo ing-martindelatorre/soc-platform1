@@ -1,7 +1,18 @@
-psycopg2-binary
-requests
-pydantic
-pydantic-settings
-APScheduler==3.10.4
+# =============================================================================
+# SOC Platform — dependencias Python
+# Instalar con:  pip install -r requirements.txt
+# =============================================================================
+
+# Base de datos
 psycopg2-binary==2.9.9
+
+# HTTP / APIs
+requests==2.32.3
+
+# Configuración y entorno
+pydantic==2.7.4
+pydantic-settings==2.3.4
 python-dotenv==1.0.1
+
+# Scheduler
+APScheduler==3.10.4

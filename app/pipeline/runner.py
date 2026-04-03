@@ -1,52 +1,48 @@
+"""
+app/pipeline/runner.py
+
+Runner principal: punto de entrada para ejecutar cualquier módulo del SOC
+por nombre. Usado por el scheduler y el CLI.
+"""
 from __future__ import annotations
 
-from app.modules.nmap.pipeline_nmap import run_nmap_pipeline
+import logging
+from typing import Any
 
-# Sentinel
-try:
-    from app.modules.sentinel.service import run_sentinel_pipeline
-except Exception:
-    def run_sentinel_pipeline(**kwargs):
-        return {
-            "ok": False,
-            "message": "Sentinel pipeline no configurado en runner.py",
-            "kwargs": kwargs,
-        }
+from app.pipeline.registry import MODULES, get_module
 
-# Snyk
-try:
-    from app.modules.snyk.service import run_snyk_pipeline
-except Exception:
-    def run_snyk_pipeline(**kwargs):
-        return {
-            "ok": False,
-            "message": "Snyk pipeline no configurado en runner.py",
-            "kwargs": kwargs,
-        }
+logger = logging.getLogger("soc-platform")
 
-# Fortinet
-try:
-    from app.modules.fortinet.service import run_fortinet_pipeline
-except Exception:
-    def run_fortinet_pipeline(**kwargs):
-        return {
-            "ok": False,
-            "message": "Fortinet pipeline no configurado en runner.py",
-            "kwargs": kwargs,
-        }
 
-PIPELINES = {
-    "nmap": run_nmap_pipeline,
-    "sentinel": run_sentinel_pipeline,
-    "snyk": run_snyk_pipeline,
-    "fortinet": run_fortinet_pipeline,
-}
+def run_module(name: str, **kwargs) -> dict[str, Any]:
+    """
+    Ejecuta el pipeline de un módulo por nombre.
+    Delega en el registry central.
+    """
+    module = get_module(name)
+    logger.info(f"[runner] Ejecutando módulo: {name}")
+    result = module.execute(**kwargs)
+    logger.info(f"[runner] Módulo {name} completado: ok={result.get('ok', '?')}")
+    return result
 
-def run_module(name: str, **kwargs):
-    if name not in PIPELINES:
-        raise ValueError(f"Pipeline no registrado: {name}")
 
-    return PIPELINES[name](**kwargs)
-
-def run_pipeline(name: str, **kwargs):
+# Alias para compatibilidad con código existente
+def run_pipeline(name: str, **kwargs) -> dict[str, Any]:
     return run_module(name, **kwargs)
+
+
+# Funciones individuales para importación directa (compatibilidad)
+def run_sentinel_pipeline(**kwargs) -> dict[str, Any]:
+    return run_module("sentinel", **kwargs)
+
+
+def run_snyk_pipeline(**kwargs) -> dict[str, Any]:
+    return run_module("snyk", **kwargs)
+
+
+def run_nmap_pipeline(**kwargs) -> dict[str, Any]:
+    return run_module("nmap", **kwargs)
+
+
+def run_fortinet_pipeline(**kwargs) -> dict[str, Any]:
+    return run_module("fortinet", **kwargs)
