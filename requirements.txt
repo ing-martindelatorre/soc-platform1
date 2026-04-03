@@ -1,18 +1,15 @@
-# =============================================================================
-# SOC Platform — dependencias Python
-# Instalar con:  pip install -r requirements.txt
-# =============================================================================
-
-# Base de datos
-psycopg2-binary==2.9.9
-
-# HTTP / APIs
-requests==2.32.3
-
-# Configuración y entorno
-pydantic==2.7.4
-pydantic-settings==2.3.4
-python-dotenv==1.0.1
-
-# Scheduler
-APScheduler==3.10.4
+annotated-types==0.7.0
+APScheduler==3.11.2
+certifi==2026.2.25
+charset-normalizer==3.4.7
+idna==3.11
+psycopg2-binary==2.9.11
+pydantic==2.12.5
+pydantic-settings==2.13.1
+pydantic_core==2.41.5
+python-dotenv==1.2.2
+requests==2.33.1
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+tzlocal==5.3.1
+urllib3==2.6.3
