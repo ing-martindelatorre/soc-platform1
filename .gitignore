@@ -2,4 +2,4 @@
 .env
 venv/
 dashboard/*.json
-dashboard/nmap_dashboard.html
+
