@@ -7,7 +7,6 @@ from collections import Counter
 import psycopg2
 from dotenv import load_dotenv
 
-
 load_dotenv()
 
 
@@ -25,53 +24,48 @@ def fetch_data():
     conn = get_connection()
     cur = conn.cursor()
 
-    # Activos
+    # Activos desde nmap_assets
     cur.execute("""
         SELECT
-            COALESCE(target, asset_name)::text AS ip,
-            asset_name AS hostname,
-            COALESCE(host_status, '') AS status
-        FROM nmap_findings
-        ORDER BY target, asset_name
+            ip,
+            COALESCE(hostname, '') AS hostname,
+            COALESCE(os_guess, '') AS os_guess,
+            COALESCE(status, '') AS status,
+            first_seen,
+            last_seen
+        FROM nmap_assets
+        ORDER BY last_seen DESC
     """)
     assets = cur.fetchall()
 
-    # Servicios
+    # Servicios desde nmap_services
     cur.execute("""
         SELECT
-            port,
-            protocol,
-            service_name,
-            product,
-            version
-        FROM nmap_findings
-        WHERE port IS NOT NULL
-        ORDER BY port
+            a.ip,
+            s.port,
+            s.protocol,
+            COALESCE(s.service_name, '') AS service_name,
+            COALESCE(s.product, '') AS product,
+            COALESCE(s.version, '') AS version
+        FROM nmap_services s
+        JOIN nmap_assets a ON s.asset_id = a.id
+        ORDER BY s.port
     """)
     services = cur.fetchall()
 
-    # Hallazgos adaptados al esquema real
+    # Hallazgos desde nmap_findings
     cur.execute("""
         SELECT
-            CASE
-                WHEN COALESCE(port_state, '') = 'open' THEN 'medium'
-                WHEN COALESCE(port_state, '') IN ('filtered', 'open|filtered') THEN 'low'
-                WHEN COALESCE(port_state, '') = 'closed' THEN 'info'
-                ELSE 'info'
-            END AS severity,
-            COALESCE(service_name, 'unknown-service') AS title,
-            COALESCE(profile_name, 'network') AS category,
-            CONCAT(
-                'Host ', COALESCE(target, 'N/A'),
-                CASE WHEN port IS NOT NULL THEN CONCAT(' puerto ', port::text) ELSE '' END,
-                CASE WHEN protocol IS NOT NULL AND protocol <> '' THEN CONCAT('/', protocol) ELSE '' END,
-                CASE WHEN port_state IS NOT NULL AND port_state <> '' THEN CONCAT(' estado ', port_state) ELSE '' END,
-                CASE WHEN product IS NOT NULL AND product <> '' THEN CONCAT(' producto ', product) ELSE '' END,
-                CASE WHEN version IS NOT NULL AND version <> '' THEN CONCAT(' version ', version) ELSE '' END,
-                CASE WHEN os_guess IS NOT NULL AND os_guess <> '' THEN CONCAT(' os ', os_guess) ELSE '' END
-            ) AS description
-        FROM nmap_findings
-        ORDER BY created_at DESC
+            COALESCE(f.severity, 'info') AS severity,
+            COALESCE(f.title, '') AS title,
+            COALESCE(f.category, '') AS category,
+            COALESCE(f.description, '') AS description,
+            COALESCE(f.recommendation, '') AS recommendation,
+            COALESCE(f.status, 'open') AS status,
+            a.ip
+        FROM nmap_findings f
+        JOIN nmap_assets a ON f.asset_id = a.id
+        ORDER BY f.created_at DESC
     """)
     findings = cur.fetchall()
 
@@ -85,60 +79,62 @@ def build_dashboard_data():
     assets, services, findings = fetch_data()
 
     severity_counter = Counter((f[0] or "unknown") for f in findings)
-    port_counter = Counter(str(s[0]) for s in services if s[0] is not None)
-    service_counter = Counter((s[2] or "unknown") for s in services)
+    port_counter     = Counter(str(s[1]) for s in services if s[1] is not None)
+    service_counter  = Counter((s[3] or "unknown") for s in services)
     category_counter = Counter((f[2] or "unknown") for f in findings)
 
     risk_score = (
-            severity_counter.get("critical", 0) * 10
-            + severity_counter.get("high", 0) * 7
-            + severity_counter.get("medium", 0) * 4
-            + severity_counter.get("low", 0) * 1
+        severity_counter.get("critical", 0) * 10
+        + severity_counter.get("high", 0) * 7
+        + severity_counter.get("medium", 0) * 4
+        + severity_counter.get("low", 0) * 1
     )
-
-    top_ports = dict(port_counter.most_common(10))
-    top_services = dict(service_counter.most_common(10))
-    top_categories = dict(category_counter.most_common(10))
 
     data = {
         "kpis": {
-            "assets": len(assets),
-            "services": len(services),
-            "findings": len(findings),
-            "critical": severity_counter.get("critical", 0),
-            "high": severity_counter.get("high", 0),
-            "medium": severity_counter.get("medium", 0),
-            "low": severity_counter.get("low", 0),
+            "assets":    len(assets),
+            "services":  len(services),
+            "findings":  len(findings),
+            "critical":  severity_counter.get("critical", 0),
+            "high":      severity_counter.get("high", 0),
+            "medium":    severity_counter.get("medium", 0),
+            "low":       severity_counter.get("low", 0),
             "risk_score": risk_score,
         },
-        "severity": dict(severity_counter),
-        "ports": top_ports,
-        "services_dist": top_services,
-        "categories": top_categories,
+        "severity":      dict(severity_counter),
+        "ports":         dict(port_counter.most_common(10)),
+        "services_dist": dict(service_counter.most_common(10)),
+        "categories":    dict(category_counter.most_common(10)),
         "assets_table": [
             {
-                "ip": a[0] or "",
+                "ip":       a[0] or "",
                 "hostname": a[1] or "",
-                "status": a[2] or "",
+                "os_guess": a[2] or "",
+                "status":   a[3] or "",
+                "last_seen": str(a[5]) if a[5] else "",
             }
             for a in assets
         ],
         "services_table": [
             {
-                "port": s[0],
-                "protocol": s[1] or "",
-                "service_name": s[2] or "",
-                "product": s[3] or "",
-                "version": s[4] or "",
+                "ip":           s[0] or "",
+                "port":         s[1],
+                "protocol":     s[2] or "",
+                "service_name": s[3] or "",
+                "product":      s[4] or "",
+                "version":      s[5] or "",
             }
             for s in services
         ],
         "findings_table": [
             {
-                "severity": f[0] or "",
-                "title": f[1] or "",
-                "category": f[2] or "",
-                "description": f[3] or "",
+                "severity":       f[0] or "",
+                "title":          f[1] or "",
+                "category":       f[2] or "",
+                "description":    f[3] or "",
+                "recommendation": f[4] or "",
+                "status":         f[5] or "",
+                "ip":             f[6] or "",
             }
             for f in findings
         ],
@@ -146,20 +142,23 @@ def build_dashboard_data():
             "text": (
                 f"Se detectaron {len(assets)} activos, {len(services)} servicios "
                 f"y {len(findings)} hallazgos en el módulo Nmap. "
+                f"Hallazgos críticos: {severity_counter.get('critical', 0)}. "
                 f"Hallazgos altos: {severity_counter.get('high', 0)}. "
                 f"Hallazgos medios: {severity_counter.get('medium', 0)}."
             )
-        }
+        },
     }
 
     return data
 
 
 def generate_html(data, output_file):
-    with open("dashboard/nmap_dashboard.html", "r", encoding="utf-8") as f:
+    template_path = os.path.join(os.path.dirname(__file__), "nmap_dashboard.html")
+
+    with open(template_path, "r", encoding="utf-8") as f:
         template = f.read()
 
-    html = template.replace("{{DATA}}", json.dumps(data, ensure_ascii=False))
+    html = template.replace("{{DATA}}", json.dumps(data, ensure_ascii=False, default=str))
 
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(html)
@@ -168,9 +167,10 @@ def generate_html(data, output_file):
 
 
 def main():
-    output = "dashboard/nmap_dashboard_output.html"
-    data = build_dashboard_data()
+    output = os.path.join(os.path.dirname(__file__), "nmap_dashboard_output.html")
+    data   = build_dashboard_data()
     generate_html(data, output)
+    print(f"[INFO] Abre en tu navegador: http://192.168.0.102:8080 o abre el archivo directamente")
 
 
 if __name__ == "__main__":
