@@ -309,10 +309,20 @@ def refresh_nmap():
 def refresh_fortinet():
     while True:
         try:
-            # Importa y llama al generador existente de fortinet
             sys.path.insert(0, str(BASE_DIR.parent))
-            from dashboard.run_fortinet_dashboard import main as fortinet_main
-            fortinet_main()
+            from dashboard.run_fortinet_dashboard import (
+                get_conn, fetch_latest_sections, build_html
+            )
+            import os
+            device_name = os.getenv("FORTI_DEVICE_NAME")
+            conn = get_conn()
+            try:
+                chosen_device, sections, errors = fetch_latest_sections(conn, device_name)
+            finally:
+                conn.close()
+            html = build_html(chosen_device, sections, errors)
+            output_path = BASE_DIR / "fortinet_dashboard_output.html"
+            output_path.write_text(html, encoding="utf-8")
             update_status("fortinet", "ok")
             print(f"[fortinet] OK | {now_str()}")
         except Exception as e:
