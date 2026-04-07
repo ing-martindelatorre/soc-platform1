@@ -328,15 +328,14 @@ def refresh_snyk():
     while True:
         try:
             sys.path.insert(0, str(BASE_DIR.parent))
-            from dashboard.run_snyk_dashboard import main as snyk_main
-            snyk_main()
+            from dashboard.run_snyk_dashboard import build_dashboard_data as snyk_build
+            snyk_build()
             update_status("snyk", "ok")
             print(f"[snyk] OK | {now_str()}")
         except Exception as e:
             update_status("snyk", "error")
             print(f"[snyk] ERROR: {e}")
         time.sleep(DASHBOARD_REFRESH["snyk"])
-
 
 # =============================================================================
 # INDEX STATUS JSON
