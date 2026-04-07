@@ -65,7 +65,7 @@ def list_org_repos(org: str, token: str, max_repos: int | None = None) -> list[d
     per_page = 100
 
     while True:
-        url = f"https://api.github.com/orgs/{org}/repos?per_page={per_page}&page={page}&type=all&sort=updated"
+        url = f"https://api.github.com/user/repos?per_page={per_page}&page={page}&sort=updated&affiliation=owner,collaborator,organization_member"
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Accept", "application/vnd.github+json")
