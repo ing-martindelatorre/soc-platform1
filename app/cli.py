@@ -26,6 +26,7 @@ def build_parser():
     return parser
 
 
+
 def main():
     logger = setup_logging()
     parser = build_parser()
