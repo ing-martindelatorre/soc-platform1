@@ -42,7 +42,7 @@ def register_job_start(job_name: str) -> int:
         """,
         (job_name, "running", datetime.now()),
     )
-    run_id = cur.fetchone()[0]
+    run_id = cur.fetchone()["id"]
     conn.commit()
     cur.close()
     conn.close()
