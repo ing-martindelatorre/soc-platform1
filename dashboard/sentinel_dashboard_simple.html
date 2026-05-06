@@ -9,7 +9,6 @@
     :root {
       --bg:      #060910;
       --surface: #0c1320;
-      --surface2:#0f1825;
       --border:  #182436;
       --text:    #c8d6e8;
       --muted:   #3d5470;
@@ -45,7 +44,6 @@
 
     .wrap { max-width: 1400px; margin: 0 auto; }
 
-    /* HEADER */
     .header {
       display: flex;
       justify-content: space-between;
@@ -55,26 +53,13 @@
       border-bottom: 1px solid var(--border);
     }
 
-    .header-left h1 {
-      font-size: 32px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
-      color: #fff;
-    }
-
+    .header-left h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; color: #fff; }
     .header-left h1 span { color: var(--accent); }
-
-    .header-left p {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 6px;
-    }
+    .header-left p { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 6px; }
 
     .badge {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      font-weight: 700;
+      font-size: 11px; font-weight: 700;
       padding: 8px 16px;
       border: 1px solid var(--accent);
       color: var(--accent);
@@ -83,13 +68,7 @@
       text-transform: uppercase;
     }
 
-    /* KPI */
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      margin-bottom: 24px;
-    }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
 
     .kpi {
       background: var(--surface);
@@ -111,47 +90,18 @@
 
     .kpi.blue::after   { background: var(--blue); }
     .kpi.green::after  { background: var(--green); }
-    .kpi.yellow::after { background: var(--yellow); }
     .kpi.orange::after { background: var(--orange); }
 
-    .kpi-label {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 12px;
-    }
-
-    .kpi-value {
-      font-size: 42px;
-      font-weight: 800;
-      color: #fff;
-      line-height: 1;
-    }
-
+    .kpi-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
+    .kpi-value { font-size: 42px; font-weight: 800; color: #fff; line-height: 1; }
     .kpi.red    .kpi-value { color: var(--red); }
     .kpi.blue   .kpi-value { color: var(--blue); }
     .kpi.green  .kpi-value { color: var(--green); }
-    .kpi.yellow .kpi-value { color: var(--yellow); }
     .kpi.orange .kpi-value { color: var(--orange); }
 
-    /* TWO COL */
-    .two-col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-bottom: 16px;
-    }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 
-    /* PANEL */
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 16px;
-    }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
 
     .panel-title {
       font-family: 'JetBrains Mono', monospace;
@@ -164,73 +114,24 @@
       align-items: center;
       gap: 8px;
     }
-
     .panel-title::before { content: '//'; color: var(--muted); }
 
-    /* BARS */
+    .chart-container { position: relative; width: 100%; height: 240px; }
+
     .bar-list { display: flex; flex-direction: column; gap: 10px; }
-
     .bar-item { display: flex; flex-direction: column; gap: 4px; }
+    .bar-label { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text); }
+    .bar-track { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .bar-fill  { height: 100%; border-radius: 2px; }
 
-    .bar-label {
-      display: flex;
-      justify-content: space-between;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      color: var(--text);
-    }
-
-    .bar-track {
-      height: 4px;
-      background: var(--border);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-
-    .bar-fill {
-      height: 100%;
-      border-radius: 2px;
-    }
-
-    /* TABLE */
     .table-wrap { overflow-x: auto; }
-
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-
-    th {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      padding: 8px 12px;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-    }
-
-    td {
-      padding: 10px 12px;
-      border-bottom: 1px solid rgba(24,36,54,0.5);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      vertical-align: top;
-    }
-
+    th { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    td { padding: 10px 12px; border-bottom: 1px solid rgba(24,36,54,0.5); font-family: 'JetBrains Mono', monospace; font-size: 12px; vertical-align: top; }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: rgba(255,77,109,0.03); }
 
-    /* SEVERITY BADGE */
-    .sev {
-      display: inline-block;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 3px 8px;
-      border-radius: 3px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-
+    .sev { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.06em; }
     .sev-critical { background: rgba(255,77,109,0.15); color: var(--red);    border: 1px solid rgba(255,77,109,0.3); }
     .sev-high     { background: rgba(255,140,66,0.15); color: var(--orange); border: 1px solid rgba(255,140,66,0.3); }
     .sev-medium   { background: rgba(255,209,102,0.15);color: var(--yellow); border: 1px solid rgba(255,209,102,0.3);}
@@ -239,16 +140,8 @@
 
     .status-active   { color: var(--red); }
     .status-resolved { color: var(--green); }
-
     .empty { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-
-    .foot {
-      text-align: center;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      color: var(--muted);
-      padding: 20px 0 4px;
-    }
+    .foot { text-align: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); padding: 20px 0 4px; }
 
     @media (max-width: 900px) {
       .kpi-grid { grid-template-columns: repeat(2, 1fr); }
@@ -267,10 +160,16 @@
     <div class="badge">Leviathan SOC</div>
   </div>
 
-  <!-- KPIs -->
   <div class="kpi-grid" id="kpis"></div>
 
-  <!-- Charts -->
+  <!-- Gráfica de incidentes en el tiempo -->
+  <div class="panel">
+    <div class="panel-title">Incidentes en el tiempo</div>
+    <div class="chart-container">
+      <canvas id="timelineChart"></canvas>
+    </div>
+  </div>
+
   <div class="two-col">
     <div class="panel">
       <div class="panel-title">Clasificación de amenazas</div>
@@ -282,13 +181,11 @@
     </div>
   </div>
 
-  <!-- Top endpoints -->
   <div class="panel">
     <div class="panel-title">Top endpoints afectados</div>
     <div class="bar-list" id="endpoint-bars"></div>
   </div>
 
-  <!-- Incidents table -->
   <div class="panel">
     <div class="panel-title">Incidentes recientes</div>
     <div class="table-wrap">
@@ -302,12 +199,14 @@
     </div>
   </div>
 
-  <div class="foot">SOC Platform · SentinelOne Dashboard · generado automáticamente desde PostgreSQL</div>
+  <div class="foot">SOC Platform · SentinelOne Dashboard · auto-refresh cada 30s</div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
-const JSON_URL = 'sentinel_dashboard_data.json';
+const JSON_URL   = 'sentinel_dashboard_data.json';
 const REFRESH_MS = 30000;
+let timelineChart = null;
 
 function esc(s) {
   const d = document.createElement('div');
@@ -332,23 +231,91 @@ function renderBars(containerId, items, keyField, valField, color) {
   `).join('');
 }
 
+function renderTimeline(timeline) {
+  if (!timeline || !timeline.length) return;
+
+  const labels = timeline.map(d => d.date);
+  const values = timeline.map(d => d.count);
+  const ctx    = document.getElementById('timelineChart').getContext('2d');
+
+  if (timelineChart) {
+    timelineChart.data.labels          = labels;
+    timelineChart.data.datasets[0].data = values;
+    timelineChart.update('none');
+    return;
+  }
+
+  timelineChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Incidentes',
+        data: values,
+        borderColor: '#ff4d6d',
+        backgroundColor: 'rgba(255,77,109,0.07)',
+        borderWidth: 2,
+        pointBackgroundColor: '#ff4d6d',
+        pointBorderColor: '#060910',
+        pointBorderWidth: 2,
+        pointRadius: 4,
+        pointHoverRadius: 7,
+        fill: true,
+        tension: 0.35,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0c1320',
+          borderColor: '#182436',
+          borderWidth: 1,
+          titleColor: '#c8d6e8',
+          bodyColor: '#ff4d6d',
+          titleFont: { family: 'JetBrains Mono', size: 11 },
+          bodyFont:  { family: 'JetBrains Mono', size: 12 },
+          padding: 10,
+          callbacks: {
+            title: ctx => ctx[0].label,
+            label: ctx => `  incidentes: ${ctx.parsed.y}`,
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 14, maxRotation: 45 },
+          grid: { color: 'rgba(24,36,54,0.6)' },
+          border: { color: '#182436' },
+        },
+        y: {
+          ticks: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 10 } },
+          grid: { color: 'rgba(24,36,54,0.6)' },
+          border: { color: '#182436' },
+          beginAtZero: true,
+        }
+      }
+    }
+  });
+}
+
 async function loadData() {
   try {
     const res  = await fetch(JSON_URL + '?t=' + Date.now());
     const data = await res.json();
     render(data);
   } catch(e) {
-    console.error('Error cargando datos:', e);
+    console.error('Error:', e);
   }
 }
 
 function render(data) {
   const s = data.summary || {};
-
-  // Timestamp
   document.getElementById('ts').textContent = `Último reporte: ${data.generated_at || '—'}`;
 
-  // KPIs
   const kpis = [
     { label: 'Total incidentes', value: s.total_incidents    || 0, cls: '' },
     { label: 'Activos',          value: s.active_incidents   || 0, cls: 'red' },
@@ -363,13 +330,12 @@ function render(data) {
     </div>
   `).join('');
 
-  // Bars
+  renderTimeline(data.incidents_over_time || []);
   renderBars('class-bars',    data.classification_counts || [], 'classification', 'count', 'var(--accent)');
   renderBars('status-bars',   data.status_counts         || [], 'status',         'count', 'var(--blue)');
   renderBars('endpoint-bars', data.top_endpoints         || [], 'agent_name',     'count', 'var(--orange)');
 
-  // Incidents table
-  const body = document.getElementById('incidents-body');
+  const body      = document.getElementById('incidents-body');
   const incidents = data.recent_incidents || [];
   if (!incidents.length) {
     body.innerHTML = '<tr><td colspan="7" class="empty">Sin incidentes recientes</td></tr>';
@@ -381,7 +347,7 @@ function render(data) {
         <td>${esc(i.threat)}</td>
         <td>${esc(i.classification)}</td>
         <td><span class="sev ${sevClass(i.severity)}">${esc(i.severity)}</span></td>
-        <td class="${i.status?.toLowerCase() === 'resolved' ? 'status-resolved' : 'status-active'}">${esc(i.status)}</td>
+        <td class="${i.status?.toLowerCase()==='resolved'?'status-resolved':'status-active'}">${esc(i.status)}</td>
         <td>${esc(i.username)}</td>
       </tr>
     `).join('');
