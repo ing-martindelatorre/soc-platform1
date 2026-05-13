@@ -5,13 +5,7 @@ dashboard/server.py
 Servidor único del SOC Platform.
 - Sirve todos los dashboards en un solo puerto (8888)
 - Regenera cada dashboard según su frecuencia configurada
-- Actualiza el index con el estado de cada módulo en tiempo real
-
-Uso:
-    cd ~/soc-platform
-    source venv/bin/activate
-    set -a; source .env; set +a
-    python3 dashboard/server.py
+- Publica soc_status.json con datos de salud para el semáforo del index
 """
 
 import json
@@ -44,36 +38,29 @@ HTTP_PORT = int(os.getenv("DASHBOARD_PORT", "8888"))
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# =============================================================================
-# Frecuencias de regeneración de cada dashboard (segundos)
-# Independiente de la frecuencia de recolección del scheduler
-# =============================================================================
 DASHBOARD_REFRESH = {
-    "sentinel": int(os.getenv("DASH_REFRESH_SENTINEL", "30")),   # 30 seg
-    "nmap":     int(os.getenv("DASH_REFRESH_NMAP",     "300")),  # 5 min
-    "fortinet": int(os.getenv("DASH_REFRESH_FORTINET", "60")),   # 1 min
-    "snyk":     int(os.getenv("DASH_REFRESH_SNYK",     "300")),  # 5 min
+    "sentinel": int(os.getenv("DASH_REFRESH_SENTINEL", "30")),
+    "nmap":     int(os.getenv("DASH_REFRESH_NMAP",     "300")),
+    "fortinet": int(os.getenv("DASH_REFRESH_FORTINET", "60")),
+    "snyk":     int(os.getenv("DASH_REFRESH_SNYK",     "300")),
 }
 
 # =============================================================================
-# Estado global de cada módulo (para el index)
+# Estado global + datos de salud por módulo
 # =============================================================================
 MODULE_STATUS: dict[str, dict] = {
-    "sentinel": {"last_update": None, "status": "pending", "records": 0},
-    "nmap":     {"last_update": None, "status": "pending", "records": 0},
-    "fortinet": {"last_update": None, "status": "pending", "records": 0},
-    "snyk":     {"last_update": None, "status": "pending", "records": 0},
+    "sentinel": {"last_update": None, "status": "pending", "records": 0, "health": {}},
+    "nmap":     {"last_update": None, "status": "pending", "records": 0, "health": {}},
+    "fortinet": {"last_update": None, "status": "pending", "records": 0, "health": {}},
+    "snyk":     {"last_update": None, "status": "pending", "records": 0, "health": {}},
 }
 _status_lock = threading.Lock()
 
 
 def db_connect():
     return psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASS,
+        host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
+        user=DB_USER, password=DB_PASS,
         cursor_factory=RealDictCursor,
     )
 
@@ -82,17 +69,18 @@ def now_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
-def update_status(module: str, status: str, records: int = 0):
+def update_status(module: str, status: str, records: int = 0, health: dict = None):
     with _status_lock:
         MODULE_STATUS[module] = {
             "last_update": now_str(),
-            "status": status,
-            "records": records,
+            "status":      status,
+            "records":     records,
+            "health":      health or {},
         }
 
 
 # =============================================================================
-# SENTINEL DASHBOARD
+# SENTINEL
 # =============================================================================
 def build_sentinel_data() -> dict:
     with db_connect() as conn:
@@ -120,8 +108,7 @@ def build_sentinel_data() -> dict:
 
             cur.execute("""
                 SELECT COALESCE(classification,'Unknown') AS classification, COUNT(*) AS count
-                FROM sentinel_incidents
-                GROUP BY 1 ORDER BY 2 DESC
+                FROM sentinel_incidents GROUP BY 1 ORDER BY 2 DESC
             """)
             classification_counts = [dict(r) for r in cur.fetchall()]
 
@@ -185,6 +172,11 @@ def build_sentinel_data() -> dict:
         "incidents_over_time":   incidents_over_time,
         "recent_incidents":      recent_incidents,
         "top_endpoints":         top_endpoints,
+        # Datos de salud para el semáforo
+        "_health": {
+            "active_incidents": int(active),
+            "total_incidents":  int(total),
+        },
     }
 
 
@@ -192,10 +184,14 @@ def refresh_sentinel():
     while True:
         try:
             data = build_sentinel_data()
+            health = data.pop("_health", {})
             json_path = BASE_DIR / "sentinel_dashboard_data.json"
-            json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-            update_status("sentinel", "ok", data["summary"]["total_incidents"])
-            print(f"[sentinel] OK — {data['summary']['total_incidents']} incidentes | {now_str()}")
+            json_path.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False, default=str),
+                encoding="utf-8"
+            )
+            update_status("sentinel", "ok", data["summary"]["total_incidents"], health)
+            print(f"[sentinel] OK — {data['summary']['total_incidents']} incidentes, {health.get('active_incidents',0)} activos | {now_str()}")
         except Exception as e:
             update_status("sentinel", "error")
             print(f"[sentinel] ERROR: {e}")
@@ -203,7 +199,7 @@ def refresh_sentinel():
 
 
 # =============================================================================
-# NMAP DASHBOARD
+# NMAP
 # =============================================================================
 def build_nmap_data() -> dict:
     from collections import Counter
@@ -237,7 +233,6 @@ def build_nmap_data() -> dict:
     sev_counter  = Counter(f["severity"] or "unknown" for f in findings)
     port_counter = Counter(str(s["port"]) for s in services if s["port"])
     svc_counter  = Counter(s["service_name"] or "unknown" for s in services)
-
     risk_score = (
         sev_counter.get("critical", 0) * 10
         + sev_counter.get("high", 0) * 7
@@ -284,6 +279,11 @@ def build_nmap_data() -> dict:
                 f"Medios: {sev_counter.get('medium', 0)}."
             )
         },
+        "_health": {
+            "high_findings":   sev_counter.get("high", 0),
+            "medium_findings": sev_counter.get("medium", 0),
+            "critical_findings": sev_counter.get("critical", 0),
+        },
     }
 
 
@@ -291,12 +291,12 @@ def refresh_nmap():
     while True:
         try:
             data = build_nmap_data()
-            # Genera el HTML con los datos incrustados
+            health = data.pop("_health", {})
             template = (BASE_DIR / "nmap_dashboard.html").read_text(encoding="utf-8")
             html = template.replace("{{DATA}}", json.dumps(data, ensure_ascii=False, default=str))
             (BASE_DIR / "nmap_dashboard_output.html").write_text(html, encoding="utf-8")
-            update_status("nmap", "ok", data["kpis"]["assets"])
-            print(f"[nmap] OK — {data['kpis']['assets']} activos, {data['kpis']['findings']} hallazgos | {now_str()}")
+            update_status("nmap", "ok", data["kpis"]["assets"], health)
+            print(f"[nmap] OK — {data['kpis']['assets']} activos, high={health.get('high_findings',0)} | {now_str()}")
         except Exception as e:
             update_status("nmap", "error")
             print(f"[nmap] ERROR: {e}")
@@ -304,7 +304,7 @@ def refresh_nmap():
 
 
 # =============================================================================
-# FORTINET DASHBOARD
+# FORTINET
 # =============================================================================
 def refresh_fortinet():
     while True:
@@ -313,7 +313,6 @@ def refresh_fortinet():
             from dashboard.run_fortinet_dashboard import (
                 get_conn, fetch_latest_sections, build_html
             )
-            import os
             device_name = os.getenv("FORTI_DEVICE_NAME")
             conn = get_conn()
             try:
@@ -323,8 +322,24 @@ def refresh_fortinet():
             html = build_html(chosen_device, sections, errors)
             output_path = BASE_DIR / "fortinet_dashboard_output.html"
             output_path.write_text(html, encoding="utf-8")
-            update_status("fortinet", "ok")
-            print(f"[fortinet] OK | {now_str()}")
+
+            # Extraer datos de salud del snapshot
+            policies   = len(sections.get("firewall_policies", {}).get("results", []))
+            interfaces = len(sections.get("interfaces", {}).get("results", []))
+
+            # Contar snapshots en DB
+            with db_connect() as dbconn:
+                with dbconn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) AS n FROM fortinet_raw_snapshots")
+                    snaps = cur.fetchone()["n"]
+
+            health = {
+                "snapshots":  int(snaps),
+                "policies":   policies,
+                "interfaces": interfaces,
+            }
+            update_status("fortinet", "ok", int(snaps), health)
+            print(f"[fortinet] OK — snaps={snaps}, policies={policies} | {now_str()}")
         except Exception as e:
             update_status("fortinet", "error")
             print(f"[fortinet] ERROR: {e}")
@@ -332,24 +347,48 @@ def refresh_fortinet():
 
 
 # =============================================================================
-# SNYK DASHBOARD
+# SNYK
 # =============================================================================
+def build_snyk_health() -> dict:
+    """Lee conteos de severidad de snyk_findings para el semáforo."""
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT LOWER(COALESCE(severity,'unknown')) AS sev, COUNT(*) AS n
+                FROM snyk_findings GROUP BY 1
+            """)
+            rows = cur.fetchall()
+            counts = {r["sev"]: int(r["n"]) for r in rows}
+
+            cur.execute("SELECT COUNT(*) AS n FROM snyk_findings")
+            total = cur.fetchone()["n"]
+
+    return {
+        "critical": counts.get("critical", 0),
+        "high":     counts.get("high", 0),
+        "medium":   counts.get("medium", 0),
+        "low":      counts.get("low", 0),
+        "total":    int(total),
+    }
+
+
 def refresh_snyk():
     while True:
         try:
             sys.path.insert(0, str(BASE_DIR.parent))
             from dashboard.run_snyk_dashboard import build_dashboard_data as snyk_build
             snyk_build()
-            update_status("snyk", "ok")
-            print(f"[snyk] OK | {now_str()}")
+            health = build_snyk_health()
+            update_status("snyk", "ok", health["total"], health)
+            print(f"[snyk] OK — total={health['total']}, critical={health['critical']} | {now_str()}")
         except Exception as e:
             update_status("snyk", "error")
             print(f"[snyk] ERROR: {e}")
         time.sleep(DASHBOARD_REFRESH["snyk"])
 
+
 # =============================================================================
 # INDEX STATUS JSON
-# Actualiza un JSON que el index.html consume para mostrar estado en vivo
 # =============================================================================
 def refresh_index_status():
     while True:
@@ -367,9 +406,7 @@ def refresh_index_status():
 # HTTP SERVER
 # =============================================================================
 class QuietHandler(SimpleHTTPRequestHandler):
-    """Handler que suprime logs de cada request para no ensuciar la consola."""
     def log_message(self, format, *args):
-        # Solo loguear errores (4xx, 5xx)
         if args and len(args) >= 2 and str(args[1]).startswith(("4", "5")):
             super().log_message(format, *args)
 
@@ -396,41 +433,42 @@ def main():
     print(f"  Snyk:      refresh cada {DASHBOARD_REFRESH['snyk']}s")
     print("=" * 60)
 
-    # Snapshot inicial de todos los módulos
     print("[init] Generando snapshots iniciales...")
-    for name, fn in [("sentinel", refresh_sentinel), ("nmap", refresh_nmap)]:
+    for name in ["sentinel", "nmap"]:
         try:
             if name == "sentinel":
-                data = build_sentinel_data()
-                json_path = BASE_DIR / "sentinel_dashboard_data.json"
-                json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-                update_status("sentinel", "ok", data["summary"]["total_incidents"])
+                data   = build_sentinel_data()
+                health = data.pop("_health", {})
+                (BASE_DIR / "sentinel_dashboard_data.json").write_text(
+                    json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
+                )
+                update_status("sentinel", "ok", data["summary"]["total_incidents"], health)
             elif name == "nmap":
-                data = build_nmap_data()
+                data   = build_nmap_data()
+                health = data.pop("_health", {})
                 template = (BASE_DIR / "nmap_dashboard.html").read_text(encoding="utf-8")
                 html = template.replace("{{DATA}}", json.dumps(data, ensure_ascii=False, default=str))
                 (BASE_DIR / "nmap_dashboard_output.html").write_text(html, encoding="utf-8")
-                update_status("nmap", "ok", data["kpis"]["assets"])
+                update_status("nmap", "ok", data["kpis"]["assets"], health)
             print(f"  [OK] {name}")
         except Exception as e:
             update_status(name, "error")
             print(f"  [WARN] {name}: {e}")
 
-    # Hilos de refresh por módulo
     threads = [
-        threading.Thread(target=refresh_sentinel,    daemon=True, name="sentinel"),
-        threading.Thread(target=refresh_nmap,        daemon=True, name="nmap"),
-        threading.Thread(target=refresh_fortinet,    daemon=True, name="fortinet"),
-        threading.Thread(target=refresh_snyk,        daemon=True, name="snyk"),
+        threading.Thread(target=refresh_sentinel,     daemon=True, name="sentinel"),
+        threading.Thread(target=refresh_nmap,         daemon=True, name="nmap"),
+        threading.Thread(target=refresh_fortinet,     daemon=True, name="fortinet"),
+        threading.Thread(target=refresh_snyk,         daemon=True, name="snyk"),
         threading.Thread(target=refresh_index_status, daemon=True, name="index-status"),
-        threading.Thread(target=start_http_server,   daemon=True, name="http"),
+        threading.Thread(target=start_http_server,    daemon=True, name="http"),
     ]
 
     for t in threads:
         t.start()
         print(f"[thread] {t.name} iniciado")
 
-    print(f"\n[OK] Dashboard disponible en: http://192.168.0.102:{HTTP_PORT}/index.html")
+    print(f"\n[OK] Portal disponible en: http://localhost:{HTTP_PORT}/index.html")
     print("[OK] Ctrl+C para salir\n")
 
     try:
