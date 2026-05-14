@@ -13,6 +13,7 @@ import os
 import sys
 import threading
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -39,14 +40,15 @@ HTTP_PORT = int(os.getenv("DASHBOARD_PORT", "8888"))
 BASE_DIR = Path(__file__).resolve().parent
 
 DASHBOARD_REFRESH = {
-    "sentinel": int(os.getenv("DASH_REFRESH_SENTINEL", "30")),
-    "nmap":     int(os.getenv("DASH_REFRESH_NMAP",     "300")),
-    "fortinet": int(os.getenv("DASH_REFRESH_FORTINET", "60")),
-    "snyk":     int(os.getenv("DASH_REFRESH_SNYK",     "300")),
+    "sentinel":        int(os.getenv("DASH_REFRESH_SENTINEL",        "30")),
+    "nmap":            int(os.getenv("DASH_REFRESH_NMAP",            "300")),
+    "fortinet":        int(os.getenv("DASH_REFRESH_FORTINET",        "60")),
+    "fortinet_threats":int(os.getenv("DASH_REFRESH_FORTINET_THREATS","120")),
+    "snyk":            int(os.getenv("DASH_REFRESH_SNYK",            "300")),
 }
 
 # =============================================================================
-# Estado global + datos de salud por módulo
+# Estado global
 # =============================================================================
 MODULE_STATUS: dict[str, dict] = {
     "sentinel": {"last_update": None, "status": "pending", "records": 0, "health": {}},
@@ -172,7 +174,6 @@ def build_sentinel_data() -> dict:
         "incidents_over_time":   incidents_over_time,
         "recent_incidents":      recent_incidents,
         "top_endpoints":         top_endpoints,
-        # Datos de salud para el semáforo
         "_health": {
             "active_incidents": int(active),
             "total_incidents":  int(total),
@@ -183,15 +184,13 @@ def build_sentinel_data() -> dict:
 def refresh_sentinel():
     while True:
         try:
-            data = build_sentinel_data()
+            data   = build_sentinel_data()
             health = data.pop("_health", {})
-            json_path = BASE_DIR / "sentinel_dashboard_data.json"
-            json_path.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False, default=str),
-                encoding="utf-8"
+            (BASE_DIR / "sentinel_dashboard_data.json").write_text(
+                json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
             )
             update_status("sentinel", "ok", data["summary"]["total_incidents"], health)
-            print(f"[sentinel] OK — {data['summary']['total_incidents']} incidentes, {health.get('active_incidents',0)} activos | {now_str()}")
+            print(f"[sentinel] OK — {data['summary']['total_incidents']} incidentes | {now_str()}")
         except Exception as e:
             update_status("sentinel", "error")
             print(f"[sentinel] ERROR: {e}")
@@ -202,7 +201,6 @@ def refresh_sentinel():
 # NMAP
 # =============================================================================
 def build_nmap_data() -> dict:
-    from collections import Counter
     with db_connect() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT ip, COALESCE(hostname,'') AS hostname, COALESCE(os_guess,'') AS os_guess, COALESCE(status,'') AS status, last_seen FROM nmap_assets ORDER BY last_seen DESC")
@@ -271,17 +269,10 @@ def build_nmap_data() -> dict:
              "status": r["status"], "ip": r["ip"]}
             for r in findings
         ],
-        "summary": {
-            "text": (
-                f"Se detectaron {len(assets)} activos, {len(services)} servicios "
-                f"y {len(findings)} hallazgos. "
-                f"Altos: {sev_counter.get('high', 0)}. "
-                f"Medios: {sev_counter.get('medium', 0)}."
-            )
-        },
+        "summary": {"text": f"Se detectaron {len(assets)} activos, {len(services)} servicios y {len(findings)} hallazgos."},
         "_health": {
-            "high_findings":   sev_counter.get("high", 0),
-            "medium_findings": sev_counter.get("medium", 0),
+            "high_findings":     sev_counter.get("high", 0),
+            "medium_findings":   sev_counter.get("medium", 0),
             "critical_findings": sev_counter.get("critical", 0),
         },
     }
@@ -290,7 +281,7 @@ def build_nmap_data() -> dict:
 def refresh_nmap():
     while True:
         try:
-            data = build_nmap_data()
+            data   = build_nmap_data()
             health = data.pop("_health", {})
             template = (BASE_DIR / "nmap_dashboard.html").read_text(encoding="utf-8")
             html = template.replace("{{DATA}}", json.dumps(data, ensure_ascii=False, default=str))
@@ -304,7 +295,7 @@ def refresh_nmap():
 
 
 # =============================================================================
-# FORTINET
+# FORTINET CONFIG
 # =============================================================================
 def refresh_fortinet():
     while True:
@@ -320,24 +311,17 @@ def refresh_fortinet():
             finally:
                 conn.close()
             html = build_html(chosen_device, sections, errors)
-            output_path = BASE_DIR / "fortinet_dashboard_output.html"
-            output_path.write_text(html, encoding="utf-8")
+            (BASE_DIR / "fortinet_dashboard_output.html").write_text(html, encoding="utf-8")
 
-            # Extraer datos de salud del snapshot
             policies   = len(sections.get("firewall_policies", {}).get("results", []))
             interfaces = len(sections.get("interfaces", {}).get("results", []))
 
-            # Contar snapshots en DB
             with db_connect() as dbconn:
                 with dbconn.cursor() as cur:
                     cur.execute("SELECT COUNT(*) AS n FROM fortinet_raw_snapshots")
                     snaps = cur.fetchone()["n"]
 
-            health = {
-                "snapshots":  int(snaps),
-                "policies":   policies,
-                "interfaces": interfaces,
-            }
+            health = {"snapshots": int(snaps), "policies": policies, "interfaces": interfaces}
             update_status("fortinet", "ok", int(snaps), health)
             print(f"[fortinet] OK — snaps={snaps}, policies={policies} | {now_str()}")
         except Exception as e:
@@ -347,22 +331,174 @@ def refresh_fortinet():
 
 
 # =============================================================================
+# FORTINET THREATS
+# =============================================================================
+def build_fortinet_threats_data() -> dict:
+    """Lee datos de amenazas de fortinet_threats y genera el JSON para el dashboard."""
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            # Summary
+            cur.execute("""
+                SELECT source, classification, COUNT(*) AS n
+                FROM fortinet_threats
+                GROUP BY source, classification
+            """)
+            rows = cur.fetchall()
+
+            counts: dict = {}
+            for r in rows:
+                src = r["source"]
+                cls = r["classification"]
+                n   = int(r["n"])
+                if src not in counts:
+                    counts[src] = {}
+                counts[src][cls] = n
+
+            # Tráfico
+            cur.execute("""
+                SELECT srcip, srcname, dstip, dstport, dstcountry,
+                       action, app, apprisk, service, policyname,
+                       sentbyte, rcvdbyte, classification,
+                       log_date::text AS log_date, log_time
+                FROM fortinet_threats WHERE source='traffic'
+                ORDER BY collected_at DESC LIMIT 200
+            """)
+            traffic_records = [dict(r) for r in cur.fetchall()]
+
+            # Eventos
+            cur.execute("""
+                SELECT logdesc, level, action, msg, classification,
+                       log_date::text AS log_date, log_time
+                FROM fortinet_threats WHERE source='event'
+                ORDER BY collected_at DESC LIMIT 200
+            """)
+            event_records = [dict(r) for r in cur.fetchall()]
+
+            # Webfilter
+            cur.execute("""
+                SELECT srcip, dstip, hostname, url, catdesc, action, classification,
+                       log_date::text AS log_date, log_time
+                FROM fortinet_threats WHERE source='webfilter'
+                ORDER BY collected_at DESC LIMIT 200
+            """)
+            webfilter_records = [dict(r) for r in cur.fetchall()]
+
+            # IPS
+            cur.execute("""
+                SELECT srcip, dstip, action, classification, payload,
+                       log_date::text AS log_date, log_time
+                FROM fortinet_threats WHERE source='ips'
+                ORDER BY collected_at DESC LIMIT 100
+            """)
+            ips_records = [dict(r) for r in cur.fetchall()]
+
+            # VPN
+            cur.execute("""
+                SELECT srcip, action, level, msg, classification,
+                       log_date::text AS log_date, log_time
+                FROM fortinet_threats WHERE source='vpn'
+                ORDER BY collected_at DESC LIMIT 100
+            """)
+            vpn_records = [dict(r) for r in cur.fetchall()]
+
+    def top_counter(records, key, limit=8):
+        c = Counter(str(r.get(key) or '') for r in records if r.get(key))
+        return [{"value": k, "count": v} for k, v in c.most_common(limit)]
+
+    tc = counts.get("traffic", {})
+    ec = counts.get("event", {})
+    wc = counts.get("webfilter", {})
+
+    return {
+        "generated_at": now_str(),
+        "summary": {
+            "total_traffic":      sum(tc.values()),
+            "suspicious_traffic": tc.get("suspicious", 0),
+            "blocked_traffic":    tc.get("blocked", 0),
+            "total_events":       sum(ec.values()),
+            "login_failures":     ec.get("login_failure", 0),
+            "critical_events":    ec.get("critical", 0),
+            "total_webfilter":    sum(wc.values()),
+            "blocked_webfilter":  wc.get("blocked", 0),
+            "total_ips":          sum(counts.get("ips", {}).values()),
+            "total_vpn":          sum(counts.get("vpn", {}).values()),
+        },
+        "traffic": {
+            "records": traffic_records,
+            "summary": {
+                "total":      sum(tc.values()),
+                "suspicious": tc.get("suspicious", 0),
+                "blocked":    tc.get("blocked", 0),
+                "normal":     tc.get("normal", 0),
+                "top_dstcountry": top_counter(traffic_records, "dstcountry"),
+                "top_app":        top_counter(traffic_records, "app"),
+                "top_srcip":      top_counter(traffic_records, "srcip"),
+                "top_action":     top_counter(traffic_records, "action", 5),
+            },
+        },
+        "events": {
+            "records":        event_records,
+            "login_failures": [r for r in event_records if r["classification"] == "login_failure"],
+            "critical":       [r for r in event_records if r["classification"] == "critical"],
+            "summary": {
+                "total":          sum(ec.values()),
+                "login_failures": ec.get("login_failure", 0),
+                "critical":       ec.get("critical", 0),
+                "top_logdesc":    top_counter(event_records, "logdesc"),
+            },
+        },
+        "webfilter": {
+            "records": webfilter_records,
+            "summary": {
+                "total":      sum(wc.values()),
+                "blocked":    wc.get("blocked", 0),
+                "suspicious": wc.get("suspicious", 0),
+                "allowed":    wc.get("allowed", 0),
+                "top_catdesc":  top_counter(webfilter_records, "catdesc"),
+                "top_hostname": top_counter(webfilter_records, "hostname"),
+            },
+        },
+        "ips": {
+            "records": ips_records,
+            "summary": {"total": len(ips_records)},
+        },
+        "vpn": {
+            "records": vpn_records,
+            "summary": {"total": len(vpn_records)},
+        },
+    }
+
+
+def refresh_fortinet_threats():
+    while True:
+        try:
+            data = build_fortinet_threats_data()
+            (BASE_DIR / "fortinet_threats_data.json").write_text(
+                json.dumps(data, indent=2, ensure_ascii=False, default=str),
+                encoding="utf-8"
+            )
+            total = data["summary"]["total_traffic"]
+            susp  = data["summary"]["suspicious_traffic"]
+            print(f"[fortinet-threats] OK — traffic={total}, suspicious={susp} | {now_str()}")
+        except Exception as e:
+            print(f"[fortinet-threats] ERROR: {e}")
+        time.sleep(DASHBOARD_REFRESH["fortinet_threats"])
+
+
+# =============================================================================
 # SNYK
 # =============================================================================
 def build_snyk_health() -> dict:
-    """Lee conteos de severidad de snyk_findings para el semáforo."""
     with db_connect() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT LOWER(COALESCE(severity,'unknown')) AS sev, COUNT(*) AS n
                 FROM snyk_findings GROUP BY 1
             """)
-            rows = cur.fetchall()
+            rows   = cur.fetchall()
             counts = {r["sev"]: int(r["n"]) for r in rows}
-
             cur.execute("SELECT COUNT(*) AS n FROM snyk_findings")
             total = cur.fetchone()["n"]
-
     return {
         "critical": counts.get("critical", 0),
         "high":     counts.get("high", 0),
@@ -430,11 +566,12 @@ def main():
     print(f"  Sentinel:  refresh cada {DASHBOARD_REFRESH['sentinel']}s")
     print(f"  Nmap:      refresh cada {DASHBOARD_REFRESH['nmap']}s")
     print(f"  Fortinet:  refresh cada {DASHBOARD_REFRESH['fortinet']}s")
+    print(f"  Forti-T:   refresh cada {DASHBOARD_REFRESH['fortinet_threats']}s")
     print(f"  Snyk:      refresh cada {DASHBOARD_REFRESH['snyk']}s")
     print("=" * 60)
 
     print("[init] Generando snapshots iniciales...")
-    for name in ["sentinel", "nmap"]:
+    for name in ["sentinel", "nmap", "fortinet_threats"]:
         try:
             if name == "sentinel":
                 data   = build_sentinel_data()
@@ -450,18 +587,25 @@ def main():
                 html = template.replace("{{DATA}}", json.dumps(data, ensure_ascii=False, default=str))
                 (BASE_DIR / "nmap_dashboard_output.html").write_text(html, encoding="utf-8")
                 update_status("nmap", "ok", data["kpis"]["assets"], health)
+            elif name == "fortinet_threats":
+                data = build_fortinet_threats_data()
+                (BASE_DIR / "fortinet_threats_data.json").write_text(
+                    json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
+                )
             print(f"  [OK] {name}")
         except Exception as e:
-            update_status(name, "error")
+            if name not in ("fortinet_threats",):
+                update_status(name, "error")
             print(f"  [WARN] {name}: {e}")
 
     threads = [
-        threading.Thread(target=refresh_sentinel,     daemon=True, name="sentinel"),
-        threading.Thread(target=refresh_nmap,         daemon=True, name="nmap"),
-        threading.Thread(target=refresh_fortinet,     daemon=True, name="fortinet"),
-        threading.Thread(target=refresh_snyk,         daemon=True, name="snyk"),
-        threading.Thread(target=refresh_index_status, daemon=True, name="index-status"),
-        threading.Thread(target=start_http_server,    daemon=True, name="http"),
+        threading.Thread(target=refresh_sentinel,         daemon=True, name="sentinel"),
+        threading.Thread(target=refresh_nmap,             daemon=True, name="nmap"),
+        threading.Thread(target=refresh_fortinet,         daemon=True, name="fortinet"),
+        threading.Thread(target=refresh_fortinet_threats, daemon=True, name="fortinet-threats"),
+        threading.Thread(target=refresh_snyk,             daemon=True, name="snyk"),
+        threading.Thread(target=refresh_index_status,     daemon=True, name="index-status"),
+        threading.Thread(target=start_http_server,        daemon=True, name="http"),
     ]
 
     for t in threads:
