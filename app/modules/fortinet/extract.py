@@ -2,9 +2,10 @@
 app/modules/fortinet/extract.py
 
 Extractor de datos desde la API REST de FortiGate.
-Soporta dos modos:
-  - config: snapshots de configuración (políticas, interfaces, objetos, rutas, admins)
-  - logs:   logs de tráfico / sistema desde disco del equipo
+Soporta tres modos:
+  - config:   snapshots de configuración (políticas, interfaces, objetos, rutas, admins)
+  - logs:     logs de tráfico / sistema desde disco del equipo
+  - threats:  logs de amenazas en memoria (tráfico, webfilter, sistema, VPN)
 """
 from __future__ import annotations
 
@@ -16,13 +17,23 @@ import urllib3
 
 
 FORTINET_CONFIG_ENDPOINTS = {
-    "system_status":     "/api/v2/monitor/system/status",
-    "ha_status":         "/api/v2/monitor/system/ha-status",
-    "interfaces":        "/api/v2/cmdb/system/interface",
+    "system_status":      "/api/v2/monitor/system/status",
+    "ha_status":          "/api/v2/monitor/system/ha-status",
+    "interfaces":         "/api/v2/cmdb/system/interface",
     "firewall_addresses": "/api/v2/cmdb/firewall/address",
-    "firewall_policies": "/api/v2/cmdb/firewall/policy",
-    "router_static":     "/api/v2/cmdb/router/static",
-    "system_admins":     "/api/v2/cmdb/system/admin",
+    "firewall_policies":  "/api/v2/cmdb/firewall/policy",
+    "router_static":      "/api/v2/cmdb/router/static",
+    "system_admins":      "/api/v2/cmdb/system/admin",
+}
+
+# Endpoints de amenazas confirmados como funcionales
+FORTINET_THREAT_ENDPOINTS = {
+    "traffic_forward": "/api/v2/log/memory/traffic/forward",
+    "event_system":    "/api/v2/log/memory/event/system",
+    "webfilter":       "/api/v2/log/memory/webfilter",
+    "event_vpn":       "/api/v2/log/memory/event/vpn",
+    "ips":             "/api/v2/log/memory/ips",
+    "virus":           "/api/v2/log/memory/virus",
 }
 
 
@@ -32,10 +43,6 @@ def _bool_env(name: str, default: bool = True) -> bool:
 
 
 def _get_token() -> str:
-    """
-    Lee el token de Fortinet.
-    Acepta FORTI_TOKEN o FORTI_API_TOKEN (por compatibilidad con config.py).
-    """
     token = os.getenv("FORTI_TOKEN") or os.getenv("FORTI_API_TOKEN")
     if not token:
         raise EnvironmentError(
@@ -105,6 +112,9 @@ def _extract_meta_from_response(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# =============================================================================
+# CONFIG
+# =============================================================================
 def extract_config(**kwargs) -> Dict[str, Any]:
     data: Dict[str, Any] = {
         "mode":     "config",
@@ -140,6 +150,9 @@ def extract_config(**kwargs) -> Dict[str, Any]:
     return data
 
 
+# =============================================================================
+# LOGS (modo legacy)
+# =============================================================================
 def _slice_results(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
     copied  = dict(payload)
     results = copied.get("results", [])
@@ -184,8 +197,90 @@ def extract_logs(**kwargs) -> Dict[str, Any]:
     return data
 
 
+# =============================================================================
+# THREATS — logs de amenazas en memoria
+# =============================================================================
+def extract_threats(**kwargs) -> Dict[str, Any]:
+    """
+    Extrae logs de amenazas desde la memoria del FortiGate.
+    Consulta múltiples endpoints en paralelo y consolida los resultados.
+
+    Parámetros opcionales:
+        rows: int   — número de registros por endpoint (default 200)
+        endpoints: list — lista de nombres de endpoints a consultar
+                          (default: todos los de FORTINET_THREAT_ENDPOINTS)
+    """
+    rows      = int(kwargs.get("rows", 200))
+    endpoints = kwargs.get("endpoints") or list(FORTINET_THREAT_ENDPOINTS.keys())
+
+    data: Dict[str, Any] = {
+        "mode":     "threats",
+        "meta":     {},
+        "sections": {},
+        "errors":   [],
+        "summary":  {},
+    }
+
+    total_records = 0
+
+    for name in endpoints:
+        path = FORTINET_THREAT_ENDPOINTS.get(name)
+        if not path:
+            continue
+
+        try:
+            result = fetch(path, extra_params={"rows": rows})
+
+            # Extraer meta del primer resultado exitoso
+            if not data["meta"]:
+                data["meta"] = _extract_meta_from_response(result)
+
+            records = result.get("results", [])
+            if not isinstance(records, list):
+                records = []
+
+            data["sections"][name] = {
+                "endpoint":     path,
+                "total_lines":  result.get("total_lines", len(records)),
+                "completed":    result.get("completed", 100),
+                "results":      records,
+            }
+            total_records += len(records)
+
+        except Exception as exc:
+            error_text = str(exc)
+            # 404 significa que el endpoint no existe en este FortiGate — no es error crítico
+            if "404" in error_text:
+                data["sections"][name] = {
+                    "endpoint": path,
+                    "total_lines": 0,
+                    "completed": 100,
+                    "results": [],
+                    "not_available": True,
+                }
+            else:
+                data["errors"].append({
+                    "section": name,
+                    "path":    path,
+                    "error":   error_text,
+                })
+
+    data["summary"] = {
+        "total_records": total_records,
+        "endpoints_ok":  len([s for s in data["sections"].values() if not s.get("not_available")]),
+        "errors_count":  len(data["errors"]),
+    }
+
+    return data
+
+
+# =============================================================================
+# Entry point
+# =============================================================================
 def extract(**kwargs) -> Dict[str, Any]:
     mode = kwargs.get("mode", "config")
     if mode == "logs":
         return extract_logs(**kwargs)
+    if mode == "threats":
+        return extract_threats(**kwargs)
     return extract_config(**kwargs)

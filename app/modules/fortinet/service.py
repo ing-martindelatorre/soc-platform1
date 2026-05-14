@@ -1,3 +1,9 @@
+"""
+app/modules/fortinet/service.py
+
+Servicio principal del módulo Fortinet.
+Orquesta extract → transform → load para los modos config, logs y threats.
+"""
 from __future__ import annotations
 
 import logging
@@ -13,26 +19,19 @@ logger = logging.getLogger("soc-platform")
 def run_fortinet_pipeline(**kwargs) -> Dict[str, Any]:
     mode = kwargs.get("mode", "config")
 
-    logger.info("Fortinet pipeline started")
-    logger.info(f"Fortinet mode: {mode}")
-    logger.info(f"Fortinet kwargs received: {kwargs}")
+    logger.info(f"Fortinet pipeline started — mode={mode}")
 
-    raw = extract(**kwargs)
-    logger.info("Fortinet extraction completed")
-
+    raw  = extract(**kwargs)
     data = transform(raw)
-    logger.info("Fortinet transformation completed")
-
     load(data)
-    logger.info("Fortinet load completed")
 
     return {
-        "ok": True,
-        "module": "fortinet",
-        "mode": mode,
-        "meta": data.get("meta", {}),
+        "ok":      True,
+        "module":  "fortinet",
+        "mode":    mode,
+        "meta":    data.get("meta", {}),
         "summary": data.get("summary", {}),
-        "errors": data.get("errors", []),
+        "errors":  data.get("errors", []),
     }
 
 
