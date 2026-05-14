@@ -36,7 +36,7 @@
       pointer-events: none; z-index: 999;
     }
 
-    .wrap { max-width: 1300px; margin: 0 auto; }
+    .wrap { max-width: 1400px; margin: 0 auto; }
 
     .header {
       display: flex; justify-content: space-between; align-items: flex-end;
@@ -67,10 +67,7 @@
     .global-health.gh-red    { background: rgba(255,77,109,0.05);  border-color: rgba(255,77,109,0.3); }
     .global-health.gh-grey   { background: var(--surface); }
 
-    .global-light {
-      width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0;
-      transition: background 0.5s, box-shadow 0.5s;
-    }
+    .global-light { width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0; transition: background 0.5s, box-shadow 0.5s; }
     .global-light.green  { background: var(--green);  box-shadow: 0 0 20px rgba(0,230,118,0.5); }
     .global-light.yellow { background: var(--yellow); box-shadow: 0 0 20px rgba(255,209,102,0.5); }
     .global-light.red    { background: var(--red);    box-shadow: 0 0 20px rgba(255,77,109,0.5); animation: blink 1s infinite; }
@@ -80,12 +77,11 @@
     .global-text h2 { font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 4px; }
     .global-text p  { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); }
 
-    /* SECTION TITLE */
     .section-title { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
     .section-title::before { content: '//'; color: var(--muted); }
 
-    /* MODULE GRID */
-    .module-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 32px; }
+    /* MODULE GRID — 3 columnas para 6 módulos */
+    .module-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 32px; }
 
     .module-card {
       background: var(--surface); border: 1px solid var(--border);
@@ -120,30 +116,27 @@
     .online-dot.on  { background: var(--green); animation: pulse 2s infinite; }
     .online-dot.off { background: var(--red); }
 
-    .card-title { font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 10px; }
+    .card-title { font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 10px; }
 
-    /* HEALTH ROWS */
-    .health-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+    .health-rows { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
     .health-row { display: flex; justify-content: space-between; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
     .hl { color: var(--muted); }
     .hv { font-weight: 700; padding: 2px 8px; border-radius: 4px; }
     .hv-g { color: var(--green);  background: rgba(0,230,118,0.08); }
     .hv-y { color: var(--yellow); background: rgba(255,209,102,0.08); }
     .hv-r { color: var(--red);    background: rgba(255,77,109,0.08); }
-    .hv-m { color: var(--muted);  }
+    .hv-m { color: var(--muted); }
 
-    /* UMBRALES */
     .thresholds { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); background: rgba(24,36,54,0.6); border-radius: 6px; padding: 8px 10px; margin-bottom: 14px; line-height: 1.8; }
     .tg { color: var(--green); } .ty { color: var(--yellow); } .tr { color: var(--red); }
 
     .card-meta { display: flex; justify-content: space-between; align-items: center; padding-top: 14px; border-top: 1px solid var(--border); }
     .card-stat { font-family: 'JetBrains Mono', monospace; }
-    .card-stat .val { font-size: 26px; font-weight: 700; color: #fff; line-height: 1; }
+    .card-stat .val { font-size: 24px; font-weight: 700; color: #fff; line-height: 1; }
     .card-stat .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px; }
     .card-link { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); }
     .card-update { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); margin-top: 8px; }
 
-    /* FREQ TABLE */
     .config-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
@@ -156,9 +149,13 @@
 
     .foot { text-align: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); padding: 20px 0 4px; }
 
-    @media (max-width: 800px) {
-      .module-grid { grid-template-columns: 1fr; }
+    @media (max-width: 1000px) {
+      .module-grid { grid-template-columns: repeat(2, 1fr); }
       .header { flex-direction: column; gap: 16px; align-items: flex-start; }
+    }
+
+    @media (max-width: 600px) {
+      .module-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -205,16 +202,13 @@
         <div class="health-row"><span class="hl">amenazas activas</span><span class="hv hv-m">—</span></div>
       </div>
       <div class="thresholds">
-        <span class="tg">🟢 0 activas = Bien</span> &nbsp;
-        <span class="ty">🟡 1–5 = Atención</span> &nbsp;
-        <span class="tr">🔴 6+ = Crítico</span>
+        <span class="tg">🟢 0 activas</span> &nbsp;
+        <span class="ty">🟡 1–5</span> &nbsp;
+        <span class="tr">🔴 6+</span>
       </div>
       <div class="card-meta">
-        <div class="card-stat">
-          <div class="val" id="val-sentinel">—</div>
-          <div class="lbl">total incidentes</div>
-        </div>
-        <div class="card-link">Ver dashboard →</div>
+        <div class="card-stat"><div class="val" id="val-sentinel">—</div><div class="lbl">total incidentes</div></div>
+        <div class="card-link">Ver →</div>
       </div>
       <div class="card-update" id="upd-sentinel">—</div>
     </a>
@@ -233,21 +227,18 @@
         <div class="health-row"><span class="hl">hallazgos high</span><span class="hv hv-m">—</span></div>
       </div>
       <div class="thresholds">
-        <span class="tg">🟢 0 high = Bien</span> &nbsp;
-        <span class="ty">🟡 1–50 = Atención</span> &nbsp;
-        <span class="tr">🔴 51+ = Crítico</span>
+        <span class="tg">🟢 0 high</span> &nbsp;
+        <span class="ty">🟡 1–50</span> &nbsp;
+        <span class="tr">🔴 51+</span>
       </div>
       <div class="card-meta">
-        <div class="card-stat">
-          <div class="val" id="val-nmap">—</div>
-          <div class="lbl">activos</div>
-        </div>
-        <div class="card-link">Ver dashboard →</div>
+        <div class="card-stat"><div class="val" id="val-nmap">—</div><div class="lbl">activos</div></div>
+        <div class="card-link">Ver →</div>
       </div>
       <div class="card-update" id="upd-nmap">—</div>
     </a>
 
-    <!-- FORTINET -->
+    <!-- FORTINET CONFIG -->
     <a href="fortinet_dashboard_output.html" class="module-card hc-grey" id="card-fortinet">
       <div class="card-header">
         <div class="card-icon">🔥</div>
@@ -256,22 +247,44 @@
           <div class="online-pill"><span class="online-dot" id="dot-fortinet"></span><span id="txt-fortinet">—</span></div>
         </div>
       </div>
-      <div class="card-title">Fortinet</div>
+      <div class="card-title">Fortinet Config</div>
       <div class="health-rows" id="rows-fortinet">
-        <div class="health-row"><span class="hl">snapshots disponibles</span><span class="hv hv-m">—</span></div>
+        <div class="health-row"><span class="hl">snapshots</span><span class="hv hv-m">—</span></div>
       </div>
       <div class="thresholds">
-        <span class="tg">🟢 datos disponibles = Bien</span> &nbsp;
-        <span class="tr">🔴 sin conexión = Crítico</span>
+        <span class="tg">🟢 conectado</span> &nbsp;
+        <span class="tr">🔴 sin conexión</span>
       </div>
       <div class="card-meta">
-        <div class="card-stat">
-          <div class="val" id="val-fortinet">—</div>
-          <div class="lbl">snapshots</div>
-        </div>
-        <div class="card-link">Ver dashboard →</div>
+        <div class="card-stat"><div class="val" id="val-fortinet">—</div><div class="lbl">snapshots</div></div>
+        <div class="card-link">Ver →</div>
       </div>
       <div class="card-update" id="upd-fortinet">—</div>
+    </a>
+
+    <!-- FORTINET THREATS -->
+    <a href="fortinet_threats_dashboard.html" class="module-card hc-grey" id="card-fortinet-threats">
+      <div class="card-header">
+        <div class="card-icon">⚠️</div>
+        <div class="card-right">
+          <div class="semaforo-badge sb-grey" id="health-fortinet-threats">Sin datos</div>
+          <div class="online-pill"><span class="online-dot" id="dot-fortinet-threats"></span><span id="txt-fortinet-threats">—</span></div>
+        </div>
+      </div>
+      <div class="card-title">Fortinet Threats</div>
+      <div class="health-rows" id="rows-fortinet-threats">
+        <div class="health-row"><span class="hl">tráfico sospechoso</span><span class="hv hv-m">—</span></div>
+      </div>
+      <div class="thresholds">
+        <span class="tg">🟢 0 sospechoso</span> &nbsp;
+        <span class="ty">🟡 1–10</span> &nbsp;
+        <span class="tr">🔴 11+</span>
+      </div>
+      <div class="card-meta">
+        <div class="card-stat"><div class="val" id="val-fortinet-threats">—</div><div class="lbl">tráfico total</div></div>
+        <div class="card-link">Ver →</div>
+      </div>
+      <div class="card-update" id="upd-fortinet-threats">—</div>
     </a>
 
     <!-- SNYK -->
@@ -285,19 +298,16 @@
       </div>
       <div class="card-title">Snyk</div>
       <div class="health-rows" id="rows-snyk">
-        <div class="health-row"><span class="hl">vulnerabilidades críticas</span><span class="hv hv-m">—</span></div>
+        <div class="health-row"><span class="hl">críticas</span><span class="hv hv-m">—</span></div>
       </div>
       <div class="thresholds">
-        <span class="tg">🟢 0 críticas = Bien</span> &nbsp;
-        <span class="ty">🟡 1–10 = Atención</span> &nbsp;
-        <span class="tr">🔴 11+ = Crítico</span>
+        <span class="tg">🟢 0 críticas</span> &nbsp;
+        <span class="ty">🟡 1–10</span> &nbsp;
+        <span class="tr">🔴 11+</span>
       </div>
       <div class="card-meta">
-        <div class="card-stat">
-          <div class="val" id="val-snyk">—</div>
-          <div class="lbl">hallazgos totales</div>
-        </div>
-        <div class="card-link">Ver dashboard →</div>
+        <div class="card-stat"><div class="val" id="val-snyk">—</div><div class="lbl">hallazgos totales</div></div>
+        <div class="card-link">Ver →</div>
       </div>
       <div class="card-update" id="upd-snyk">—</div>
     </a>
@@ -310,7 +320,8 @@
       <thead><tr><th>Módulo</th><th>Recolección</th><th>Refresh dashboard</th><th>Justificación</th></tr></thead>
       <tbody>
         <tr><td>SentinelOne</td><td><span class="freq-tag ff">cada 5 min</span></td><td><span class="freq-tag ff">cada 30 seg</span></td><td>Amenazas en tiempo real</td></tr>
-        <tr><td>Fortinet</td><td><span class="freq-tag fm">cada 15 min</span></td><td><span class="freq-tag fm">cada 1 min</span></td><td>Logs y configuración</td></tr>
+        <tr><td>Fortinet Config</td><td><span class="freq-tag fm">cada 15 min</span></td><td><span class="freq-tag fm">cada 1 min</span></td><td>Políticas e interfaces</td></tr>
+        <tr><td>Fortinet Threats</td><td><span class="freq-tag fm">cada 15 min</span></td><td><span class="freq-tag fm">cada 2 min</span></td><td>Tráfico y amenazas en memoria</td></tr>
         <tr><td>Nmap</td><td><span class="freq-tag fs">cada 6 horas</span></td><td><span class="freq-tag fs">cada 5 min</span></td><td>Discovery de red</td></tr>
         <tr><td>Snyk</td><td><span class="freq-tag fs">domingos 1am</span></td><td><span class="freq-tag fs">cada 5 min</span></td><td>Scans de repositorios</td></tr>
       </tbody>
@@ -323,11 +334,15 @@
 <script>
 document.getElementById('ts').textContent = new Date().toLocaleString('es-MX');
 
-// ─── Umbrales ────────────────────────────────────────────────────────────────
 function getHealth(mod, value) {
   if (value === null || value === undefined) return 'grey';
   if (mod === 'fortinet') return value > 0 ? 'green' : 'red';
-  const t = { sentinel: [0,5], nmap: [0,50], snyk: [0,10] }[mod] || [0,0];
+  const t = {
+    sentinel:         [0, 5],
+    nmap:             [0, 50],
+    snyk:             [0, 10],
+    'fortinet-threats': [0, 10],
+  }[mod] || [0, 0];
   if (value <= t[0]) return 'green';
   if (value <= t[1]) return 'yellow';
   return 'red';
@@ -341,29 +356,23 @@ function hvClass(h) {
   return { green:'hv-g', yellow:'hv-y', red:'hv-r' }[h] || 'hv-m';
 }
 
-// ─── Actualizar una tarjeta ──────────────────────────────────────────────────
 function updateCard(mod, isOnline, healthVal, totalVal, lastUpdate, rows) {
   const h = isOnline ? getHealth(mod, healthVal) : 'grey';
 
-  // Color del borde
   const card = document.getElementById('card-' + mod);
   if (card) card.className = `module-card hc-${h}`;
 
-  // Badge de salud
   const hEl = document.getElementById('health-' + mod);
   if (hEl) { hEl.textContent = healthLabel(h); hEl.className = `semaforo-badge sb-${h}`; }
 
-  // Online dot
   const dot = document.getElementById('dot-' + mod);
   const txt = document.getElementById('txt-' + mod);
   if (dot) dot.className = `online-dot ${isOnline ? 'on' : 'off'}`;
   if (txt) txt.textContent = isOnline ? 'Online' : 'Offline';
 
-  // Valor principal
   const vEl = document.getElementById('val-' + mod);
-  if (vEl) vEl.textContent = totalVal !== undefined ? Number(totalVal).toLocaleString() : '—';
+  if (vEl) vEl.textContent = totalVal !== undefined && totalVal !== null ? Number(totalVal).toLocaleString() : '—';
 
-  // Filas de salud
   const rEl = document.getElementById('rows-' + mod);
   if (rEl && rows) {
     rEl.innerHTML = rows.map(([label, val, cls]) =>
@@ -371,14 +380,12 @@ function updateCard(mod, isOnline, healthVal, totalVal, lastUpdate, rows) {
     ).join('');
   }
 
-  // Timestamp
   const uEl = document.getElementById('upd-' + mod);
   if (uEl && lastUpdate) uEl.textContent = 'Actualizado: ' + lastUpdate;
 
   return h;
 }
 
-// ─── Semáforo global ─────────────────────────────────────────────────────────
 function updateGlobal(healths) {
   const box   = document.getElementById('global-box');
   const light = document.getElementById('global-light');
@@ -404,7 +411,6 @@ function updateGlobal(healths) {
   desc.textContent  = d;
 }
 
-// ─── Carga de datos ──────────────────────────────────────────────────────────
 async function loadStatus() {
   try {
     const res = await fetch('soc_status.json?t=' + Date.now());
@@ -413,68 +419,62 @@ async function loadStatus() {
     const healths = [];
 
     // SENTINEL
-    const s  = d.sentinel || {};
-    const sh = s.health   || {};
-    healths.push(updateCard('sentinel',
-      s.status === 'ok',
-      sh.active_incidents,
-      s.records,
-      s.last_update,
-      [
-        ['amenazas activas', sh.active_incidents, hvClass(getHealth('sentinel', sh.active_incidents))],
-        ['total incidentes', s.records, 'hv-m'],
-      ]
-    ));
+    const s = d.sentinel || {};
+    const sh = s.health || {};
+    healths.push(updateCard('sentinel', s.status==='ok', sh.active_incidents, s.records, s.last_update, [
+      ['amenazas activas', sh.active_incidents, hvClass(getHealth('sentinel', sh.active_incidents))],
+      ['total incidentes', s.records, 'hv-m'],
+    ]));
 
     // NMAP
-    const n  = d.nmap || {};
+    const n = d.nmap || {};
     const nh = n.health || {};
-    healths.push(updateCard('nmap',
-      n.status === 'ok',
-      nh.high_findings,
-      n.records,
-      n.last_update,
-      [
-        ['hallazgos high',        nh.high_findings,   hvClass(getHealth('nmap', nh.high_findings))],
-        ['hallazgos medium',      nh.medium_findings, 'hv-m'],
-        ['activos descubiertos',  n.records,          'hv-m'],
-      ]
-    ));
+    healths.push(updateCard('nmap', n.status==='ok', nh.high_findings, n.records, n.last_update, [
+      ['hallazgos high',   nh.high_findings,   hvClass(getHealth('nmap', nh.high_findings))],
+      ['hallazgos medium', nh.medium_findings, 'hv-m'],
+      ['activos',          n.records,          'hv-m'],
+    ]));
 
-    // FORTINET
-    const f  = d.fortinet || {};
-    const fh = f.health   || {};
-    healths.push(updateCard('fortinet',
-      f.status === 'ok',
-      fh.snapshots,
-      f.records,
-      f.last_update,
-      [
-        ['snapshots disponibles', fh.snapshots, hvClass(getHealth('fortinet', fh.snapshots))],
-        ['políticas detectadas',  fh.policies,  'hv-m'],
-        ['interfaces activas',    fh.interfaces,'hv-m'],
-      ]
-    ));
+    // FORTINET CONFIG
+    const f = d.fortinet || {};
+    const fh = f.health || {};
+    healths.push(updateCard('fortinet', f.status==='ok', fh.snapshots, f.records, f.last_update, [
+      ['snapshots',  fh.snapshots,  hvClass(getHealth('fortinet', fh.snapshots))],
+      ['políticas',  fh.policies,   'hv-m'],
+      ['interfaces', fh.interfaces, 'hv-m'],
+    ]));
+
+    // FORTINET THREATS — lee directamente del JSON de threats
+    try {
+      const tr = await fetch('fortinet_threats_data.json?t=' + Date.now());
+      if (tr.ok) {
+        const td = await tr.json();
+        const susp  = td.summary?.suspicious_traffic || 0;
+        const total = td.summary?.total_traffic || 0;
+        const blocked = td.summary?.blocked_traffic || 0;
+        const hVal  = getHealth('fortinet-threats', susp);
+        healths.push(hVal);
+        updateCard('fortinet-threats', true, susp, total, td.generated_at, [
+          ['tráfico sospechoso', susp,    hvClass(hVal)],
+          ['bloqueado',          blocked, blocked > 0 ? 'hv-r' : 'hv-m'],
+          ['IPS alerts',         td.summary?.total_ips || 0, 'hv-m'],
+        ]);
+      }
+    } catch(e) { healths.push('grey'); }
 
     // SNYK
-    const sk  = d.snyk || {};
+    const sk = d.snyk || {};
     const skh = sk.health || {};
-    healths.push(updateCard('snyk',
-      sk.status === 'ok',
-      skh.critical,
-      sk.records,
-      sk.last_update,
-      [
-        ['críticas', skh.critical, hvClass(getHealth('snyk', skh.critical))],
-        ['high',     skh.high,     skh.high > 100 ? 'hv-y' : 'hv-m'],
-        ['medium',   skh.medium,   'hv-m'],
-      ]
-    ));
+    healths.push(updateCard('snyk', sk.status==='ok', skh.critical, sk.records, sk.last_update, [
+      ['críticas', skh.critical, hvClass(getHealth('snyk', skh.critical))],
+      ['high',     skh.high,     (skh.high||0) > 100 ? 'hv-y' : 'hv-m'],
+      ['medium',   skh.medium,   'hv-m'],
+    ]));
 
     updateGlobal(healths);
     document.getElementById('ts').textContent = new Date().toLocaleString('es-MX');
 
-  } catch(e) { /* soc_status.json aún no existe */ }
+  } catch(e) { /* sin datos aún */ }
 }
 
 loadStatus();

@@ -4,18 +4,14 @@ app/pipeline/scheduler.py
 Motor de recolección del SOC Platform.
 Ejecuta cada pipeline con su frecuencia propia e independiente.
 
-Frecuencias de recolección (traer datos nuevos desde las fuentes):
-  - Sentinel:  cada 5 minutos   (amenazas en tiempo real)
-  - Fortinet:  cada 15 minutos  (logs y config)
-  - Nmap quick: cada 6 horas   (discovery de red)
-  - Nmap deep:  domingos 2am   (scan completo)
-  - Snyk:       domingos 1am   (scans pesados de repos)
-
-Uso:
-    cd ~/soc-platform
-    source venv/bin/activate
-    set -a; source .env; set +a
-    python3 -m app.pipeline.scheduler
+Frecuencias:
+  - Sentinel:         cada 5 minutos
+  - Fortinet config:  cada 15 minutos
+  - Fortinet logs:    cada 15 minutos (offset +7min)
+  - Fortinet threats: cada 15 minutos (offset +3min)
+  - Nmap quick:       cada 6 horas
+  - Nmap deep:        domingos 2am
+  - Snyk:             domingos 1am
 """
 
 import traceback
@@ -33,7 +29,7 @@ from app.pipeline.runner import run_pipeline
 
 def register_job_start(job_name: str) -> int:
     conn = get_connection()
-    cur = conn.cursor()
+    cur  = conn.cursor()
     cur.execute(
         """
         INSERT INTO job_runs (job_name, status, started_at)
@@ -51,7 +47,7 @@ def register_job_start(job_name: str) -> int:
 
 def register_job_end(run_id: int, status: str, message: str = "") -> None:
     conn = get_connection()
-    cur = conn.cursor()
+    cur  = conn.cursor()
     cur.execute(
         """
         UPDATE job_runs
@@ -68,20 +64,17 @@ def register_job_end(run_id: int, status: str, message: str = "") -> None:
 
 
 def execute_job(job_name: str, **kwargs) -> None:
-    """
-    Ejecuta un pipeline registrando inicio y fin en la tabla job_runs.
-    """
-    run_id = register_job_start(job_name)
+    run_id  = register_job_start(job_name)
     started = datetime.now()
 
     try:
-        result = run_pipeline(job_name, **kwargs)
+        result  = run_pipeline(job_name, **kwargs)
         elapsed = (datetime.now() - started).seconds
         register_job_end(run_id, "success", str(result)[:5000])
         print(f"[OK] {job_name} | {elapsed}s | {result.get('message', '')}")
 
     except Exception as exc:
-        elapsed = (datetime.now() - started).seconds
+        elapsed    = (datetime.now() - started).seconds
         error_text = f"{exc}\n{traceback.format_exc()}"
         register_job_end(run_id, "failed", error_text[:5000])
         print(f"[ERROR] {job_name} | {elapsed}s | {exc}")
@@ -94,119 +87,78 @@ def execute_job(job_name: str, **kwargs) -> None:
 def main() -> None:
     scheduler = BlockingScheduler(timezone="America/Mexico_City")
 
-    # -------------------------------------------------------------------------
-    # SENTINEL — cada 5 minutos
-    # Justificación: alertas y amenazas en tiempo real
-    # -------------------------------------------------------------------------
+    now = datetime.now()
+
+    # ── SENTINEL — cada 5 minutos ─────────────────────────────────────────────
     scheduler.add_job(
-        execute_job,
-        trigger="interval",
-        minutes=5,
+        execute_job, trigger="interval", minutes=5,
         args=["sentinel"],
-        id="sentinel_job",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=60,
+        id="sentinel_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=60,
     )
 
-    # -------------------------------------------------------------------------
-    # FORTINET config — cada 15 minutos
-    # Justificación: cambios de configuración y logs de tráfico
-    # -------------------------------------------------------------------------
+    # ── FORTINET config — cada 15 minutos ─────────────────────────────────────
     scheduler.add_job(
-        execute_job,
-        trigger="interval",
-        minutes=15,
-        args=["fortinet"],
-        kwargs={"mode": "config"},
-        id="fortinet_config_job",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=120,
+        execute_job, trigger="interval", minutes=15,
+        args=["fortinet"], kwargs={"mode": "config"},
+        id="fortinet_config_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=120,
     )
 
-    # -------------------------------------------------------------------------
-    # FORTINET logs — cada 15 minutos (offset de 7 min para no coincidir)
-    # -------------------------------------------------------------------------
+    # ── FORTINET logs — cada 15 minutos (offset +7 min) ───────────────────────
     scheduler.add_job(
-        execute_job,
-        trigger="interval",
-        minutes=15,
-        args=["fortinet"],
-        kwargs={"mode": "logs"},
-        id="fortinet_logs_job",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=120,
-        start_date=datetime.now().replace(minute=(datetime.now().minute + 7) % 60),
+        execute_job, trigger="interval", minutes=15,
+        args=["fortinet"], kwargs={"mode": "logs"},
+        id="fortinet_logs_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+        start_date=now.replace(minute=(now.minute + 7) % 60),
     )
 
-    # -------------------------------------------------------------------------
-    # NMAP quick — cada 6 horas
-    # Justificación: discovery rápido de activos, no requiere ser frecuente
-    # -------------------------------------------------------------------------
+    # ── FORTINET threats — cada 15 minutos (offset +3 min) ────────────────────
     scheduler.add_job(
-        execute_job,
-        trigger="interval",
-        hours=6,
+        execute_job, trigger="interval", minutes=15,
+        args=["fortinet"], kwargs={"mode": "threats"},
+        id="fortinet_threats_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+        start_date=now.replace(minute=(now.minute + 3) % 60),
+    )
+
+    # ── NMAP quick — cada 6 horas ─────────────────────────────────────────────
+    scheduler.add_job(
+        execute_job, trigger="interval", hours=6,
         args=["nmap"],
-        id="nmap_quick_job",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=300,
+        id="nmap_quick_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
-    # -------------------------------------------------------------------------
-    # NMAP deep — domingos a las 2am
-    # Justificación: scan completo semanal para auditoría
-    # -------------------------------------------------------------------------
+    # ── NMAP deep — domingos 2am ──────────────────────────────────────────────
     scheduler.add_job(
-        execute_job,
-        trigger="cron",
-        day_of_week="sun",
-        hour=2,
-        minute=0,
+        execute_job, trigger="cron", day_of_week="sun", hour=2, minute=0,
         args=["nmap"],
-        id="nmap_deep_job",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=600,
+        id="nmap_deep_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 
-    # -------------------------------------------------------------------------
-    # SNYK — domingos a la 1am
-    # Justificación: scans pesados de repositorios, semanal es suficiente
-    # -------------------------------------------------------------------------
+    # ── SNYK — domingos 1am ───────────────────────────────────────────────────
     scheduler.add_job(
-        execute_job,
-        trigger="cron",
-        day_of_week="sun",
-        hour=1,
-        minute=0,
+        execute_job, trigger="cron", day_of_week="sun", hour=1, minute=0,
         args=["snyk"],
-        id="snyk_job",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=600,
+        id="snyk_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 
     print("=" * 55)
     print("  SOC Platform — Scheduler de Recolección")
     print("=" * 55)
-    print("  Módulo           Frecuencia")
-    print("  ─────────────────────────────────────")
-    print("  Sentinel         cada 5 minutos")
-    print("  Fortinet config  cada 15 minutos")
-    print("  Fortinet logs    cada 15 minutos")
-    print("  Nmap quick       cada 6 horas")
-    print("  Nmap deep        domingos 02:00")
-    print("  Snyk             domingos 01:00")
+    print("  Módulo              Frecuencia")
+    print("  ──────────────────────────────────────")
+    print("  Sentinel            cada 5 minutos")
+    print("  Fortinet config     cada 15 minutos")
+    print("  Fortinet logs       cada 15 minutos")
+    print("  Fortinet threats    cada 15 minutos")
+    print("  Nmap quick          cada 6 horas")
+    print("  Nmap deep           domingos 02:00")
+    print("  Snyk                domingos 01:00")
     print("=" * 55)
     print("  Ctrl+C para detener\n")
 
