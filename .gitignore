@@ -3,3 +3,4 @@
 venv/
 dashboard/*.json
 
+repos_snyk_batch.txt
