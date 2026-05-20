@@ -8,19 +8,18 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <style>
     :root {
-      --bg:        #060910;
-      --surface:   #0c1320;
-      --surface2:  #0f1825;
-      --border:    #182436;
-      --text:      #c8d6e8;
-      --muted:     #3d5470;
-      --accent:    #ff8c42;
-      --blue:      #00d4ff;
-      --green:     #00e676;
-      --red:       #ff4d6d;
-      --yellow:    #ffd166;
-      --purple:    #bd93f9;
-      --orange:    #ff8c42;
+      --bg:      #060910;
+      --surface: #0c1320;
+      --border:  #182436;
+      --text:    #c8d6e8;
+      --muted:   #3d5470;
+      --accent:  #ff8c42;
+      --blue:    #00d4ff;
+      --green:   #00e676;
+      --red:     #ff4d6d;
+      --yellow:  #ffd166;
+      --purple:  #bd93f9;
+      --orange:  #ff8c42;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -36,49 +35,76 @@
     body::before {
       content: '';
       position: fixed; inset: 0;
-      background: repeating-linear-gradient(
-        0deg, transparent, transparent 2px,
-        rgba(255,140,66,0.01) 2px, rgba(255,140,66,0.01) 4px
-      );
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,140,66,0.01) 2px, rgba(255,140,66,0.01) 4px);
       pointer-events: none; z-index: 999;
     }
 
     .wrap { max-width: 1400px; margin: 0 auto; }
 
-    /* HEADER */
     .header {
       display: flex; justify-content: space-between; align-items: flex-end;
-      margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid var(--border);
+      margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border);
     }
 
     .header-left h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; color: #fff; }
     .header-left h1 span { color: var(--accent); }
     .header-left p { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 6px; }
 
-    .badge {
-      font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
-      padding: 8px 16px; border: 1px solid var(--accent); color: var(--accent);
-      border-radius: 4px; letter-spacing: 0.1em; text-transform: uppercase;
+    .header-right { display: flex; align-items: center; gap: 12px; }
+
+    .badge { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; padding: 8px 16px; border: 1px solid var(--accent); color: var(--accent); border-radius: 4px; letter-spacing: 0.1em; text-transform: uppercase; }
+
+    /* PERIOD SELECTOR */
+    .period-selector {
+      display: flex;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
     }
 
-    /* KPI GRID */
+    .period-btn {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; font-weight: 700;
+      padding: 8px 18px;
+      cursor: pointer;
+      color: var(--muted);
+      border: none;
+      background: transparent;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      transition: all 0.2s;
+    }
+
+    .period-btn:hover { color: var(--text); }
+    .period-btn.active { background: var(--accent); color: #000; }
+
+    /* PERIOD LABEL */
+    .period-info {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 14px;
+      margin-bottom: 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .period-info span { color: var(--accent); font-weight: 700; }
+
+    /* KPI */
     .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
 
-    .kpi {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 12px; padding: 18px; position: relative; overflow: hidden;
-    }
-
-    .kpi::after {
-      content: ''; position: absolute; top: 0; left: 0; right: 0;
-      height: 2px; background: var(--accent); opacity: 0.4;
-    }
-
+    .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; position: relative; overflow: hidden; }
+    .kpi::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--accent); opacity: 0.4; }
     .kpi.red::after    { background: var(--red); }
     .kpi.green::after  { background: var(--green); }
     .kpi.yellow::after { background: var(--yellow); }
     .kpi.blue::after   { background: var(--blue); }
-    .kpi.purple::after { background: var(--purple); }
 
     .kpi-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
     .kpi-value { font-size: 36px; font-weight: 800; color: #fff; line-height: 1; }
@@ -86,54 +112,30 @@
     .kpi.green  .kpi-value { color: var(--green); }
     .kpi.yellow .kpi-value { color: var(--yellow); }
     .kpi.blue   .kpi-value { color: var(--blue); }
-    .kpi.purple .kpi-value { color: var(--purple); }
 
-    /* ALERT BANNER */
-    .alert-banner {
-      border-radius: 10px; padding: 14px 20px; margin-bottom: 20px;
-      font-family: 'JetBrains Mono', monospace; font-size: 12px;
-      display: flex; align-items: center; gap: 12px;
-      border: 1px solid;
-    }
-
-    .alert-banner.suspicious {
-      background: rgba(255,140,66,0.08); border-color: rgba(255,140,66,0.3); color: var(--orange);
-    }
-
-    .alert-banner.clean {
-      background: rgba(0,230,118,0.06); border-color: rgba(0,230,118,0.2); color: var(--green);
-    }
+    /* ALERT */
+    .alert-banner { border-radius: 10px; padding: 14px 20px; margin-bottom: 20px; font-family: 'JetBrains Mono', monospace; font-size: 12px; display: flex; align-items: center; gap: 12px; border: 1px solid; }
+    .alert-banner.suspicious { background: rgba(255,140,66,0.08); border-color: rgba(255,140,66,0.3); color: var(--orange); }
+    .alert-banner.clean      { background: rgba(0,230,118,0.06);  border-color: rgba(0,230,118,0.2); color: var(--green); }
 
     /* LAYOUT */
-    .two-col   { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .two-col   { display: grid; grid-template-columns: 1fr 1fr;     gap: 16px; margin-bottom: 16px; }
     .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 
-    /* PANEL */
-    .panel {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 12px; padding: 20px; margin-bottom: 16px;
-    }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
 
-    .panel-title {
-      font-family: 'JetBrains Mono', monospace; font-size: 11px;
-      color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em;
-      margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
-    }
-
+    .panel-title { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
     .panel-title::before { content: '//'; color: var(--muted); }
 
-    /* CHART */
     .chart-wrap { position: relative; width: 100%; height: 200px; }
     .chart-wrap.tall { height: 260px; }
 
-    /* BARS */
     .bar-list { display: flex; flex-direction: column; gap: 8px; }
     .bar-item { display: flex; flex-direction: column; gap: 3px; }
     .bar-label { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text); }
     .bar-track { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
     .bar-fill  { height: 100%; border-radius: 2px; transition: width 0.6s ease; }
 
-    /* TABLE */
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
@@ -141,12 +143,7 @@
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: rgba(255,140,66,0.03); }
 
-    /* BADGES */
-    .cls {
-      display: inline-block; font-family: 'JetBrains Mono', monospace;
-      font-size: 9px; font-weight: 700; padding: 3px 8px;
-      border-radius: 3px; text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
-    }
+    .cls { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
     .cls-suspicious { background: rgba(255,140,66,0.15); color: var(--orange); border: 1px solid rgba(255,140,66,0.3); }
     .cls-blocked     { background: rgba(255,77,109,0.15);  color: var(--red);    border: 1px solid rgba(255,77,109,0.3); }
     .cls-normal      { background: rgba(0,230,118,0.08);   color: var(--green);  border: 1px solid rgba(0,230,118,0.2); }
@@ -154,32 +151,22 @@
     .cls-info        { background: rgba(61,84,112,0.2);    color: var(--muted);  border: 1px solid var(--border); }
     .cls-alert       { background: rgba(255,209,102,0.15); color: var(--yellow); border: 1px solid rgba(255,209,102,0.3); }
     .cls-critical    { background: rgba(255,77,109,0.2);   color: var(--red);    border: 1px solid rgba(255,77,109,0.4); }
+    .cls-login_failure { background: rgba(255,77,109,0.2); color: var(--red);    border: 1px solid rgba(255,77,109,0.4); }
 
-    .risk {
-      display: inline-block; font-family: 'JetBrains Mono', monospace;
-      font-size: 9px; font-weight: 700; padding: 2px 7px;
-      border-radius: 3px; text-transform: uppercase;
-    }
+    .risk { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; }
     .risk-high     { background: rgba(255,77,109,0.12);  color: var(--red); }
     .risk-elevated { background: rgba(255,140,66,0.12);  color: var(--orange); }
     .risk-medium   { background: rgba(255,209,102,0.12); color: var(--yellow); }
     .risk-low      { background: rgba(0,230,118,0.08);   color: var(--green); }
 
-    .empty { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 12px; text-align: center; padding: 20px 0; }
-
-    /* TABS */
     .tabs { display: flex; gap: 2px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
-    .tab {
-      font-family: 'JetBrains Mono', monospace; font-size: 11px;
-      padding: 8px 16px; cursor: pointer; color: var(--muted);
-      border-bottom: 2px solid transparent; transition: all 0.2s;
-      text-transform: uppercase; letter-spacing: 0.06em;
-    }
+    .tab { font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 8px 16px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.06em; }
     .tab:hover { color: var(--text); }
     .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+
+    .empty { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 12px; text-align: center; padding: 20px 0; }
 
     .foot { text-align: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); padding: 20px 0 4px; }
 
@@ -198,7 +185,19 @@
       <h1>FORTINET <span>THREATS</span> DASHBOARD</h1>
       <p id="ts">SOC Platform — cargando...</p>
     </div>
-    <div class="badge">Leviathan SOC</div>
+    <div class="header-right">
+      <div class="period-selector">
+        <button class="period-btn active" id="btn-24h" onclick="setPeriod('24h')">24 horas</button>
+        <button class="period-btn" id="btn-7d"  onclick="setPeriod('7d')">7 días</button>
+      </div>
+      <div class="badge">Leviathan SOC</div>
+    </div>
+  </div>
+
+  <!-- Period info -->
+  <div class="period-info">
+    📅 Mostrando: <span id="period-label">Últimas 24 horas</span>
+    &nbsp;·&nbsp; Actualizado: <span id="period-updated">—</span>
   </div>
 
   <!-- KPIs -->
@@ -206,6 +205,12 @@
 
   <!-- Alert banner -->
   <div class="alert-banner" id="alert-banner" style="display:none"></div>
+
+  <!-- Gráfica de tendencia en el tiempo -->
+  <div class="panel">
+    <div class="panel-title">Tráfico en el tiempo</div>
+    <div class="chart-wrap tall"><canvas id="timelineChart"></canvas></div>
+  </div>
 
   <!-- CHARTS ROW -->
   <div class="three-col">
@@ -223,7 +228,6 @@
     </div>
   </div>
 
-  <!-- CLASIFICACIÓN DE TRÁFICO -->
   <div class="two-col">
     <div class="panel">
       <div class="panel-title">Clasificación de tráfico</div>
@@ -235,7 +239,7 @@
     </div>
   </div>
 
-  <!-- TABS DE DETALLE -->
+  <!-- TABS -->
   <div class="panel">
     <div class="tabs">
       <div class="tab active" onclick="switchTab('traffic')">🔴 Tráfico sospechoso</div>
@@ -244,68 +248,58 @@
       <div class="tab" onclick="switchTab('vpn')">🔒 VPN</div>
     </div>
 
-    <!-- TRÁFICO -->
     <div class="tab-content active" id="tab-traffic">
       <div class="table-wrap">
         <table>
-          <thead><tr>
-            <th>Hora</th><th>Origen</th><th>Destino</th><th>País</th>
-            <th>App</th><th>Riesgo</th><th>Acción</th><th>Estado</th>
-          </tr></thead>
+          <thead><tr><th>Hora</th><th>Origen</th><th>Destino</th><th>País</th><th>App</th><th>Riesgo</th><th>Acción</th><th>Estado</th></tr></thead>
           <tbody id="traffic-body"></tbody>
         </table>
       </div>
     </div>
 
-    <!-- WEBFILTER -->
     <div class="tab-content" id="tab-webfilter">
       <div class="table-wrap">
         <table>
-          <thead><tr>
-            <th>Hora</th><th>Origen</th><th>Hostname</th>
-            <th>Categoría</th><th>Acción</th><th>Estado</th>
-          </tr></thead>
+          <thead><tr><th>Hora</th><th>Origen</th><th>Hostname</th><th>Categoría</th><th>Acción</th><th>Estado</th></tr></thead>
           <tbody id="webfilter-body"></tbody>
         </table>
       </div>
     </div>
 
-    <!-- EVENTOS -->
     <div class="tab-content" id="tab-events">
       <div class="table-wrap">
         <table>
-          <thead><tr>
-            <th>Hora</th><th>Descripción</th><th>Nivel</th><th>Acción</th><th>Estado</th>
-          </tr></thead>
+          <thead><tr><th>Hora</th><th>Descripción</th><th>Nivel</th><th>Acción</th><th>Estado</th></tr></thead>
           <tbody id="events-body"></tbody>
         </table>
       </div>
     </div>
 
-    <!-- VPN -->
     <div class="tab-content" id="tab-vpn">
       <div class="table-wrap">
         <table>
-          <thead><tr>
-            <th>Hora</th><th>Origen</th><th>Acción</th><th>Nivel</th><th>Mensaje</th>
-          </tr></thead>
+          <thead><tr><th>Hora</th><th>Origen</th><th>Acción</th><th>Nivel</th><th>Mensaje</th></tr></thead>
           <tbody id="vpn-body"></tbody>
         </table>
       </div>
     </div>
-
   </div>
 
-  <div class="foot">SOC Platform · Fortinet Threats Dashboard · generado desde PostgreSQL</div>
+  <div class="foot">SOC Platform · Fortinet Threats · Historial completo en DB · Dashboard muestra período seleccionado</div>
 </div>
 
 <script>
-const JSON_URL   = 'fortinet_threats_data.json';
-const REFRESH_MS = 60000;
+// ─── Estado ───────────────────────────────────────────────────────────────────
+let currentPeriod = '24h';
+let timelineChart, countryChart, appChart, webfilterChart, trafficPieChart;
+const REFRESH_MS = 120000;
 
-// Chart instances
-let countryChart, appChart, webfilterChart, trafficPieChart;
+const JSON_FILES = {
+  '24h': 'fortinet_threats_data.json',
+  '7d':  'fortinet_threats_data_7d.json',
+};
 
+// ─── Utils ────────────────────────────────────────────────────────────────────
 function esc(s) {
   const d = document.createElement('div');
   d.textContent = s || '';
@@ -313,96 +307,44 @@ function esc(s) {
 }
 
 function clsBadge(c) {
-  const map = {
-    suspicious: 'cls-suspicious', blocked: 'cls-blocked',
-    normal: 'cls-normal', allowed: 'cls-allowed',
-    info: 'cls-info', alert: 'cls-alert',
-    critical: 'cls-critical', login_failure: 'cls-blocked',
-  };
-  return `<span class="cls ${map[c] || 'cls-info'}">${esc(c)}</span>`;
+  const map = { suspicious:'cls-suspicious', blocked:'cls-blocked', normal:'cls-normal', allowed:'cls-allowed', info:'cls-info', alert:'cls-alert', critical:'cls-critical', login_failure:'cls-login_failure' };
+  return `<span class="cls ${map[c]||'cls-info'}">${esc(c)}</span>`;
 }
 
 function riskBadge(r) {
   if (!r) return '';
   const map = { high:'risk-high', elevated:'risk-elevated', medium:'risk-medium', low:'risk-low' };
-  return `<span class="risk ${map[r] || ''}">${esc(r)}</span>`;
+  return `<span class="risk ${map[r]||''}">${esc(r)}</span>`;
 }
 
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach((t, i) => {
-    const names = ['traffic','webfilter','events','vpn'];
-    t.className = 'tab' + (names[i] === name ? ' active' : '');
-  });
+  const names = ['traffic','webfilter','events','vpn'];
+  document.querySelectorAll('.tab').forEach((t,i) => t.className = 'tab' + (names[i]===name?' active':''));
   document.querySelectorAll('.tab-content').forEach(c => c.className = 'tab-content');
-  const el = document.getElementById('tab-' + name);
+  const el = document.getElementById('tab-'+name);
   if (el) el.className = 'tab-content active';
 }
 
-function makeBarChart(containerId, entries, color) {
-  const el = document.getElementById(containerId);
-  if (!el || !entries || !entries.length) { el && (el.innerHTML = '<div class="empty">Sin datos</div>'); return; }
-  const max = Math.max(...entries.map(e => e.count));
-  el.innerHTML = entries.slice(0, 8).map(e => `
-    <div class="bar-item">
-      <div class="bar-label"><span>${esc(e.value || e.logdesc || '—')}</span><span>${e.count}</span></div>
-      <div class="bar-track"><div class="bar-fill" style="width:${Math.round(e.count/max*100)}%;background:${color}"></div></div>
-    </div>
-  `).join('');
+function setPeriod(p) {
+  currentPeriod = p;
+  document.getElementById('btn-24h').className = 'period-btn' + (p==='24h'?' active':'');
+  document.getElementById('btn-7d').className  = 'period-btn' + (p==='7d' ?' active':'');
+  loadData();
 }
 
-function makeDonutChart(canvas, labels, values, colors, title) {
-  const existing = Chart.getChart(canvas);
-  if (existing) existing.destroy();
-
-  return new Chart(canvas, {
-    type: 'doughnut',
-    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: '#0c1320', borderWidth: 3, hoverOffset: 4 }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      cutout: '65%',
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 10, padding: 8 }
-        },
-        tooltip: {
-          backgroundColor: '#0c1320', borderColor: '#182436', borderWidth: 1,
-          titleColor: '#c8d6e8', bodyColor: '#ff8c42',
-          titleFont: { family: 'JetBrains Mono' }, bodyFont: { family: 'JetBrains Mono' },
-        }
-      }
-    }
-  });
+// ─── Charts ───────────────────────────────────────────────────────────────────
+function destroyChart(ref) {
+  try { if (ref) ref.destroy(); } catch(e) {}
 }
 
-function makeHBarChart(canvas, labels, values, color) {
-  const existing = Chart.getChart(canvas);
-  if (existing) existing.destroy();
-
+function makeHBar(canvas, labels, values, color) {
+  const ex = Chart.getChart(canvas); if (ex) ex.destroy();
   return new Chart(canvas, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        data: values,
-        backgroundColor: color + '33',
-        borderColor: color,
-        borderWidth: 1,
-        borderRadius: 3,
-      }]
-    },
+    data: { labels, datasets: [{ data: values, backgroundColor: color+'33', borderColor: color, borderWidth: 1, borderRadius: 3 }] },
     options: {
-      indexAxis: 'y',
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#0c1320', borderColor: '#182436', borderWidth: 1,
-          titleColor: '#c8d6e8', bodyColor: color,
-          titleFont: { family: 'JetBrains Mono', size: 10 },
-          bodyFont:  { family: 'JetBrains Mono', size: 11 },
-        }
-      },
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0c1320', borderColor: '#182436', borderWidth: 1, titleColor: '#c8d6e8', bodyColor: color, titleFont: { family: 'JetBrains Mono', size: 10 }, bodyFont: { family: 'JetBrains Mono', size: 11 } } },
       scales: {
         x: { ticks: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: 'rgba(24,36,54,0.6)' }, border: { color: '#182436' } },
         y: { ticks: { color: '#c8d6e8', font: { family: 'JetBrains Mono', size: 10 } }, grid: { display: false }, border: { color: '#182436' } },
@@ -411,34 +353,104 @@ function makeHBarChart(canvas, labels, values, color) {
   });
 }
 
-async function loadData() {
-  try {
-    const res  = await fetch(JSON_URL + '?t=' + Date.now());
-    if (!res.ok) { console.warn('No se pudo cargar', JSON_URL); return; }
-    const data = await res.json();
-    render(data);
-  } catch(e) {
-    console.error('Error:', e);
-  }
+function makeDonut(canvas, labels, values, colors) {
+  const ex = Chart.getChart(canvas); if (ex) ex.destroy();
+  return new Chart(canvas, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: '#0c1320', borderWidth: 3 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '65%',
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 10, padding: 8 } },
+        tooltip: { backgroundColor: '#0c1320', borderColor: '#182436', borderWidth: 1, titleColor: '#c8d6e8', bodyColor: '#ff8c42', titleFont: { family: 'JetBrains Mono' }, bodyFont: { family: 'JetBrains Mono' } }
+      }
+    }
+  });
 }
 
+function makeTimeline(canvas, overTime) {
+  const ex = Chart.getChart(canvas); if (ex) ex.destroy();
+  if (!overTime || !overTime.length) return;
+
+  const labels = overTime.map(d => {
+    const dt = new Date(d.hora);
+    return dt.toLocaleString('es-MX', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  });
+
+  return new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Total',
+          data: overTime.map(d => d.total),
+          borderColor: '#00d4ff', backgroundColor: 'rgba(0,212,255,0.05)',
+          borderWidth: 1.5, pointRadius: 2, fill: true, tension: 0.3,
+        },
+        {
+          label: 'Sospechoso',
+          data: overTime.map(d => d.suspicious),
+          borderColor: '#ff8c42', backgroundColor: 'rgba(255,140,66,0.08)',
+          borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#ff8c42', fill: true, tension: 0.3,
+        },
+        {
+          label: 'Bloqueado',
+          data: overTime.map(d => d.blocked),
+          borderColor: '#ff4d6d', backgroundColor: 'rgba(255,77,109,0.08)',
+          borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3,
+        },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12, padding: 10 } },
+        tooltip: { backgroundColor: '#0c1320', borderColor: '#182436', borderWidth: 1, titleColor: '#c8d6e8', titleFont: { family: 'JetBrains Mono', size: 10 }, bodyFont: { family: 'JetBrains Mono', size: 11 } }
+      },
+      scales: {
+        x: { ticks: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 9 }, maxTicksLimit: 12, maxRotation: 45 }, grid: { color: 'rgba(24,36,54,0.6)' }, border: { color: '#182436' } },
+        y: { ticks: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: 'rgba(24,36,54,0.6)' }, border: { color: '#182436' }, beginAtZero: true },
+      }
+    }
+  });
+}
+
+function makeBarList(containerId, entries, color) {
+  const el = document.getElementById(containerId);
+  if (!el || !entries || !entries.length) { el && (el.innerHTML = '<div class="empty">Sin datos</div>'); return; }
+  const max = Math.max(...entries.map(e => e.count || e.value || 0));
+  el.innerHTML = entries.slice(0, 8).map(e => {
+    const label = e.value || e.logdesc || '—';
+    const val   = e.count || 0;
+    return `
+      <div class="bar-item">
+        <div class="bar-label"><span>${esc(label)}</span><span>${val}</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.round(val/max*100)}%;background:${color}"></div></div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
 function render(data) {
-  const s  = data.summary  || {};
-  const tr = data.traffic  || {};
-  const ev = data.events   || {};
+  const s  = data.summary   || {};
+  const tr = data.traffic   || {};
+  const ev = data.events    || {};
   const wf = data.webfilter || {};
-  const ip = data.ips      || {};
-  const vp = data.vpn      || {};
 
-  document.getElementById('ts').textContent = `Actualizado: ${data.generated_at || '—'}`;
+  document.getElementById('ts').textContent            = `Actualizado: ${data.generated_at || '—'}`;
+  document.getElementById('period-label').textContent  = data.period_label || '—';
+  document.getElementById('period-updated').textContent = data.generated_at || '—';
 
-  // ── KPIs ──────────────────────────────────────────────────────────────────
+  // KPIs
   const kpis = [
-    { label: 'Tráfico total',    value: s.total_traffic      || 0, cls: '' },
-    { label: 'Sospechoso',       value: s.suspicious_traffic || 0, cls: (s.suspicious_traffic||0) > 0 ? 'yellow' : 'green' },
-    { label: 'Bloqueado',        value: s.blocked_traffic    || 0, cls: (s.blocked_traffic||0) > 0 ? 'red' : 'green' },
-    { label: 'Webfilter',        value: s.total_webfilter    || 0, cls: 'blue' },
-    { label: 'IPS alerts',       value: s.total_ips          || 0, cls: (s.total_ips||0) > 0 ? 'red' : 'green' },
+    { label: 'Tráfico total',  value: s.total_traffic      || 0, cls: '' },
+    { label: 'Sospechoso',     value: s.suspicious_traffic || 0, cls: (s.suspicious_traffic||0) > 0 ? 'yellow' : 'green' },
+    { label: 'Bloqueado',      value: s.blocked_traffic    || 0, cls: (s.blocked_traffic||0) > 0 ? 'red' : 'green' },
+    { label: 'Webfilter block',value: s.blocked_webfilter  || 0, cls: (s.blocked_webfilter||0) > 0 ? 'red' : '' },
+    { label: 'IPS alerts',     value: s.total_ips          || 0, cls: (s.total_ips||0) > 0 ? 'red' : 'green' },
   ];
 
   document.getElementById('kpis').innerHTML = kpis.map(k => `
@@ -448,142 +460,93 @@ function render(data) {
     </div>
   `).join('');
 
-  // ── Alert banner ──────────────────────────────────────────────────────────
+  // Alert banner
   const banner   = document.getElementById('alert-banner');
   const suspList = (tr.records || []).filter(r => r.classification === 'suspicious');
-
   if (suspList.length > 0) {
     const apps = [...new Set(suspList.map(r => r.app).filter(Boolean))].join(', ');
-    banner.className   = 'alert-banner suspicious';
-    banner.style.display = 'flex';
-    banner.innerHTML = `⚠️ <strong>${suspList.length} conexiones sospechosas detectadas</strong> — Apps: ${esc(apps)}`;
+    banner.className = 'alert-banner suspicious'; banner.style.display = 'flex';
+    banner.innerHTML = `⚠️ <strong>${suspList.length} conexiones sospechosas en ${data.period_label}</strong> — Apps: ${esc(apps)}`;
   } else {
-    banner.className   = 'alert-banner clean';
-    banner.style.display = 'flex';
-    banner.innerHTML = '✓ Sin tráfico sospechoso detectado en el período actual';
+    banner.className = 'alert-banner clean'; banner.style.display = 'flex';
+    banner.innerHTML = `✓ Sin tráfico sospechoso en ${data.period_label}`;
   }
 
-  // ── Gráfica: países ───────────────────────────────────────────────────────
+  // Gráfica de tendencia
+  makeTimeline(document.getElementById('timelineChart'), tr.over_time || []);
+
+  // Gráficas
   const topCountries = (tr.summary?.top_dstcountry || []).slice(0, 6);
-  if (topCountries.length) {
-    const colors = ['#00d4ff','#ff8c42','#ffd166','#00e676','#bd93f9','#ff4d6d'];
-    makeHBarChart(
-      document.getElementById('countryChart'),
-      topCountries.map(c => c.value),
-      topCountries.map(c => c.count),
-      '#00d4ff'
-    );
-  }
+  if (topCountries.length) makeHBar(document.getElementById('countryChart'), topCountries.map(c=>c.value), topCountries.map(c=>c.count), '#00d4ff');
 
-  // ── Gráfica: apps ─────────────────────────────────────────────────────────
   const topApps = (tr.summary?.top_app || []).slice(0, 6);
-  if (topApps.length) {
-    makeHBarChart(
-      document.getElementById('appChart'),
-      topApps.map(a => a.value),
-      topApps.map(a => a.count),
-      '#ff8c42'
-    );
-  }
+  if (topApps.length) makeHBar(document.getElementById('appChart'), topApps.map(a=>a.value), topApps.map(a=>a.count), '#ff8c42');
 
-  // ── Gráfica: webfilter categorías ─────────────────────────────────────────
-  const topCats = (wf.summary?.top_catdesc || []).filter(c => c.value).slice(0, 5);
-  if (topCats.length) {
-    makeDonutChart(
-      document.getElementById('webfilterChart'),
-      topCats.map(c => c.value),
-      topCats.map(c => c.count),
-      ['#00d4ff','#ff8c42','#ffd166','#00e676','#bd93f9'],
-    );
-  }
+  const topCats = (wf.summary?.top_catdesc || []).filter(c=>c.value).slice(0, 5);
+  if (topCats.length) makeDonut(document.getElementById('webfilterChart'), topCats.map(c=>c.value), topCats.map(c=>c.count), ['#00d4ff','#ff8c42','#ffd166','#00e676','#bd93f9']);
 
-  // ── Gráfica: pie clasificación tráfico ────────────────────────────────────
   const tsum = tr.summary || {};
-  makeDonutChart(
-    document.getElementById('trafficPieChart'),
+  makeDonut(document.getElementById('trafficPieChart'),
     ['Normal', 'Sospechoso', 'Bloqueado'],
-    [tsum.normal || 0, tsum.suspicious || 0, tsum.blocked || 0],
-    ['#00e676', '#ff8c42', '#ff4d6d'],
+    [tsum.normal||0, tsum.suspicious||0, tsum.blocked||0],
+    ['#00e676', '#ff8c42', '#ff4d6d']
   );
 
-  // ── Bars: eventos ─────────────────────────────────────────────────────────
-  makeBarChart('events-bars', ev.summary?.top_logdesc || [], 'var(--blue)');
+  makeBarList('events-bars', ev.summary?.top_logdesc || [], 'var(--blue)');
 
-  // ── Tabla: tráfico sospechoso (primero) + normal ──────────────────────────
-  const trafficRecords = [...(tr.records || [])].sort((a,b) =>
-    (b.classification === 'suspicious' ? 1 : 0) - (a.classification === 'suspicious' ? 1 : 0)
-  ).slice(0, 50);
-
+  // Tabla tráfico — sospechosos primero
+  const trafficRecords = [...(tr.records||[])].sort((a,b) => (b.classification==='suspicious'?1:0)-(a.classification==='suspicious'?1:0)).slice(0,50);
   const tbody = document.getElementById('traffic-body');
-  if (!trafficRecords.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin registros</td></tr>';
-  } else {
-    tbody.innerHTML = trafficRecords.map(r => `
-      <tr>
-        <td>${esc(r.time || '—')}</td>
-        <td>${esc(r.srcname || r.srcip || '—')}</td>
-        <td>${esc(r.dstip || '—')}${r.dstport ? ':' + r.dstport : ''}</td>
-        <td>${esc(r.dstcountry || '—')}</td>
-        <td>${esc(r.app || '—')}</td>
-        <td>${riskBadge(r.apprisk)}</td>
-        <td>${esc(r.action || '—')}</td>
-        <td>${clsBadge(r.classification)}</td>
-      </tr>
-    `).join('');
-  }
+  tbody.innerHTML = !trafficRecords.length ? '<tr><td colspan="8" class="empty">Sin registros</td></tr>' :
+    trafficRecords.map(r => `<tr>
+      <td>${esc(r.time||'—')}</td>
+      <td>${esc(r.srcname||r.srcip||'—')}</td>
+      <td>${esc(r.dstip||'—')}${r.dstport?':'+r.dstport:''}</td>
+      <td>${esc(r.dstcountry||'—')}</td>
+      <td>${esc(r.app||'—')}</td>
+      <td>${riskBadge(r.apprisk)}</td>
+      <td>${esc(r.action||'—')}</td>
+      <td>${clsBadge(r.classification)}</td>
+    </tr>`).join('');
 
-  // ── Tabla: webfilter ──────────────────────────────────────────────────────
-  const wfRecords = (wf.records || []).slice(0, 50);
-  const wfBody = document.getElementById('webfilter-body');
-  if (!wfRecords.length) {
-    wfBody.innerHTML = '<tr><td colspan="6" class="empty">Sin registros</td></tr>';
-  } else {
-    wfBody.innerHTML = wfRecords.map(r => `
-      <tr>
-        <td>${esc(r.time || '—')}</td>
-        <td>${esc(r.srcip || '—')}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.hostname || r.url || '—')}</td>
-        <td>${esc(r.catdesc || '—')}</td>
-        <td>${esc(r.action || '—')}</td>
-        <td>${clsBadge(r.classification)}</td>
-      </tr>
-    `).join('');
-  }
+  // Tabla webfilter
+  const wfRecords = (wf.records||[]).slice(0,50);
+  document.getElementById('webfilter-body').innerHTML = !wfRecords.length ? '<tr><td colspan="6" class="empty">Sin registros</td></tr>' :
+    wfRecords.map(r => `<tr>
+      <td>${esc(r.time||'—')}</td><td>${esc(r.srcip||'—')}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.hostname||r.url||'—')}</td>
+      <td>${esc(r.catdesc||'—')}</td><td>${esc(r.action||'—')}</td><td>${clsBadge(r.classification)}</td>
+    </tr>`).join('');
 
-  // ── Tabla: eventos ────────────────────────────────────────────────────────
-  const evRecords = (ev.records || [])
-    .filter(r => r.classification !== 'info' || r.logdesc !== 'System performance statistics')
-    .slice(0, 50);
-  const evBody = document.getElementById('events-body');
-  if (!evRecords.length) {
-    evBody.innerHTML = '<tr><td colspan="5" class="empty">Sin eventos relevantes</td></tr>';
-  } else {
-    evBody.innerHTML = evRecords.map(r => `
-      <tr>
-        <td>${esc(r.time || '—')}</td>
-        <td style="max-width:250px">${esc((r.logdesc || r.msg || '—').substring(0,80))}</td>
-        <td>${esc(r.level || '—')}</td>
-        <td>${esc(r.action || '—')}</td>
-        <td>${clsBadge(r.classification)}</td>
-      </tr>
-    `).join('');
-  }
+  // Tabla eventos (filtrar performance stats repetitivos)
+  const evRecords = (ev.records||[]).filter(r => r.logdesc !== 'System performance statistics').slice(0,50);
+  document.getElementById('events-body').innerHTML = !evRecords.length ? '<tr><td colspan="5" class="empty">Sin eventos relevantes</td></tr>' :
+    evRecords.map(r => `<tr>
+      <td>${esc(r.time||'—')}</td>
+      <td style="max-width:250px">${esc((r.logdesc||r.msg||'—').substring(0,80))}</td>
+      <td>${esc(r.level||'—')}</td><td>${esc(r.action||'—')}</td><td>${clsBadge(r.classification)}</td>
+    </tr>`).join('');
 
-  // ── Tabla: VPN ────────────────────────────────────────────────────────────
-  const vpnRecords = (vp.records || []).slice(0, 30);
-  const vpnBody = document.getElementById('vpn-body');
-  if (!vpnRecords.length) {
-    vpnBody.innerHTML = '<tr><td colspan="5" class="empty">Sin eventos VPN</td></tr>';
-  } else {
-    vpnBody.innerHTML = vpnRecords.map(r => `
-      <tr>
-        <td>${esc(r.time || '—')}</td>
-        <td>${esc(r.srcip || '—')}</td>
-        <td>${esc(r.action || '—')}</td>
-        <td>${esc(r.level || '—')}</td>
-        <td style="color:var(--muted);font-size:10px">${esc((r.msg || '—').substring(0,80))}</td>
-      </tr>
-    `).join('');
+  // Tabla VPN
+  const vpnRecords = (data.vpn?.records||[]).slice(0,30);
+  document.getElementById('vpn-body').innerHTML = !vpnRecords.length ? '<tr><td colspan="5" class="empty">Sin eventos VPN</td></tr>' :
+    vpnRecords.map(r => `<tr>
+      <td>${esc(r.time||'—')}</td><td>${esc(r.srcip||'—')}</td>
+      <td>${esc(r.action||'—')}</td><td>${esc(r.level||'—')}</td>
+      <td style="color:var(--muted);font-size:10px">${esc((r.msg||'—').substring(0,80))}</td>
+    </tr>`).join('');
+}
+
+// ─── Carga de datos ───────────────────────────────────────────────────────────
+async function loadData() {
+  try {
+    const url = JSON_FILES[currentPeriod] + '?t=' + Date.now();
+    const res = await fetch(url);
+    if (!res.ok) { console.warn('No se pudo cargar', url); return; }
+    const data = await res.json();
+    render(data);
+  } catch(e) {
+    console.error('Error:', e);
   }
 }
 
