@@ -29,13 +29,23 @@ except Exception as e:
 # Snyk
 # ---------------------------------------------------------------------------
 try:
-    from app.modules.snyk.service import run_snyk_scan_for_repo
+    from app.modules.snyk.service import run_snyk_scan_for_repos
+    from pathlib import Path
 
     class _SnykPipeline:
         name = "snyk"
         def execute(self, **kwargs):
-            repo_path = kwargs.get("repo_path", "")
-            return run_snyk_scan_for_repo(repo_path)
+            batch_file = kwargs.get("repos_file", "repos_snyk_batch.txt")
+            batch_path = Path(batch_file)
+            if not batch_path.exists():
+                return {"ok": False, "module": "snyk", "error": f"batch file no encontrado: {batch_file}"}
+            repo_paths = [
+                line.strip() for line in batch_path.read_text().splitlines()
+                if line.strip() and not line.startswith("#")
+            ]
+            if not repo_paths:
+                return {"ok": True, "module": "snyk", "message": "No hay repos en el batch file"}
+            return run_snyk_scan_for_repos(repo_paths)
 
     _snyk = _SnykPipeline()
 except Exception as e:
