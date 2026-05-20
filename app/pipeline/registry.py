@@ -45,7 +45,17 @@ try:
             ]
             if not repo_paths:
                 return {"ok": True, "module": "snyk", "message": "No hay repos en el batch file"}
-            return run_snyk_scan_for_repos(repo_paths)
+            results = run_snyk_scan_for_repos(repo_paths)
+            total   = sum(r.get("findings_count", 0) for r in results)
+            failed  = sum(1 for r in results if r.get("status") == "failed_cli_error")
+            return {
+                "ok":      True,
+                "module":  "snyk",
+                "message": f"Snyk completado: {len(results)} repos, {total} findings",
+                "results": results,
+                "total_findings": total,
+                "failed": failed,
+            }
 
     _snyk = _SnykPipeline()
 except Exception as e:
