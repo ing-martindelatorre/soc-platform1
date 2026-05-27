@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>SOC Config — Leviathan</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:      #060910;
+      --surface: #0c1320;
+      --surface2:#0f1825;
+      --border:  #182436;
+      --text:    #c8d6e8;
+      --muted:   #3d5470;
+      --accent:  #00d4ff;
+      --green:   #00e676;
+      --red:     #ff4d6d;
+      --yellow:  #ffd166;
+      --orange:  #ff8c42;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Syne', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── LOGIN SCREEN ─────────────────────────────────────────────────────── */
+    #login-screen {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 40px;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+
+    .login-logo { font-size: 40px; margin-bottom: 16px; }
+
+    .login-card h1 { font-size: 24px; font-weight: 800; color: #fff; margin-bottom: 4px; }
+    .login-card h1 span { color: var(--accent); }
+    .login-card p  { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); margin-bottom: 32px; }
+
+    .form-group { margin-bottom: 16px; text-align: left; }
+    .form-group label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; display: block; margin-bottom: 6px; }
+
+    .form-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .form-input:focus { border-color: var(--accent); }
+
+    .btn-primary {
+      width: 100%;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      padding: 13px;
+      font-family: 'Syne', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: opacity 0.2s;
+    }
+
+    .btn-primary:hover { opacity: 0.85; }
+
+    .login-error {
+      background: rgba(255,77,109,0.1);
+      border: 1px solid rgba(255,77,109,0.3);
+      color: var(--red);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    /* ── MAIN APP ─────────────────────────────────────────────────────────── */
+    #app { display: none; }
+
+    .topbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+    }
+
+    .topbar-left { display: flex; align-items: center; gap: 12px; }
+    .topbar-logo { font-size: 20px; font-weight: 800; color: #fff; }
+    .topbar-logo span { color: var(--accent); }
+    .topbar-sub { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
+
+    .topbar-right { display: flex; align-items: center; gap: 12px; }
+
+    .btn-logout {
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      color: var(--muted); background: transparent; border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 14px; cursor: pointer; transition: all 0.2s;
+    }
+    .btn-logout:hover { color: var(--red); border-color: var(--red); }
+
+    .btn-home {
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      color: var(--accent); background: transparent; border: 1px solid rgba(0,212,255,0.3);
+      border-radius: 6px; padding: 6px 14px; cursor: pointer; text-decoration: none;
+    }
+
+    .main { padding: 28px; max-width: 1200px; margin: 0 auto; }
+
+    /* ── TABS ─────────────────────────────────────────────────────────────── */
+    .nav-tabs {
+      display: flex; gap: 4px; margin-bottom: 24px;
+      border-bottom: 1px solid var(--border); padding-bottom: 0;
+    }
+
+    .nav-tab {
+      font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+      padding: 10px 20px; cursor: pointer; color: var(--muted);
+      border-bottom: 2px solid transparent; transition: all 0.2s;
+      text-transform: uppercase; letter-spacing: 0.06em; background: none; border-top: none; border-left: none; border-right: none;
+    }
+    .nav-tab:hover { color: var(--text); }
+    .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* ── PANEL ────────────────────────────────────────────────────────────── */
+    .panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 24px; margin-bottom: 20px;
+    }
+
+    .panel-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .panel-title {
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .panel-title::before { content: '//'; color: var(--muted); }
+
+    /* ── FORM ─────────────────────────────────────────────────────────────── */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+    .form-full { grid-column: 1 / -1; }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+    .field input, .field select, .field textarea {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px;
+      color: var(--text); outline: none; transition: border-color 0.2s;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+    .field select option { background: var(--surface2); }
+    .field textarea { resize: vertical; min-height: 80px; }
+
+    .field-hint { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); }
+
+    /* ── BUTTONS ──────────────────────────────────────────────────────────── */
+    .btn {
+      font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+      padding: 9px 20px; border-radius: 8px; cursor: pointer; border: none;
+      text-transform: uppercase; letter-spacing: 0.06em; transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-accent  { background: var(--accent);  color: #000; }
+    .btn-green   { background: var(--green);   color: #000; }
+    .btn-red     { background: rgba(255,77,109,0.15); color: var(--red); border: 1px solid rgba(255,77,109,0.3); }
+    .btn-muted   { background: rgba(61,84,112,0.3); color: var(--muted); border: 1px solid var(--border); }
+
+    .btn-row { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+
+    /* ── TABLE ────────────────────────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    td { padding: 12px; border-bottom: 1px solid rgba(24,36,54,0.5); font-family: 'JetBrains Mono', monospace; font-size: 11px; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(0,212,255,0.02); }
+
+    /* ── BADGES ───────────────────────────────────────────────────────────── */
+    .badge {
+      display: inline-block; font-family: 'JetBrains Mono', monospace;
+      font-size: 9px; font-weight: 700; padding: 3px 8px;
+      border-radius: 3px; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .badge-green  { background: rgba(0,230,118,0.12); color: var(--green);  border: 1px solid rgba(0,230,118,0.3); }
+    .badge-red    { background: rgba(255,77,109,0.12); color: var(--red);   border: 1px solid rgba(255,77,109,0.3); }
+    .badge-blue   { background: rgba(0,212,255,0.10); color: var(--accent); border: 1px solid rgba(0,212,255,0.2); }
+    .badge-yellow { background: rgba(255,209,102,0.12);color: var(--yellow);border: 1px solid rgba(255,209,102,0.3); }
+    .badge-orange { background: rgba(255,140,66,0.12); color: var(--orange);border: 1px solid rgba(255,140,66,0.3); }
+
+    /* ── TOGGLE ───────────────────────────────────────────────────────────── */
+    .toggle { position: relative; display: inline-block; width: 36px; height: 20px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; cursor: pointer; inset: 0;
+      background: var(--border); border-radius: 20px; transition: 0.3s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute;
+      height: 14px; width: 14px; left: 3px; bottom: 3px;
+      background: white; border-radius: 50%; transition: 0.3s;
+    }
+    .toggle input:checked + .toggle-slider { background: var(--green); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+
+    /* ── ALERTS ───────────────────────────────────────────────────────────── */
+    .toast {
+      position: fixed; top: 20px; right: 20px; z-index: 9999;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 20px;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px;
+      display: none; min-width: 280px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    .toast.success { border-color: rgba(0,230,118,0.4); color: var(--green); }
+    .toast.error   { border-color: rgba(255,77,109,0.4); color: var(--red); }
+
+    .empty-state {
+      text-align: center; padding: 40px 20px;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted);
+    }
+
+    .empty-state .empty-icon { font-size: 36px; margin-bottom: 12px; }
+
+    /* ── LOG TABLE ────────────────────────────────────────────────────────── */
+    .log-row td:first-child { color: var(--muted); }
+
+    @media (max-width: 768px) {
+      .form-grid, .form-grid.three { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── TOAST ─────────────────────────────────────────────────────────────── -->
+<div class="toast" id="toast"></div>
+
+<!-- ── LOGIN ─────────────────────────────────────────────────────────────── -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">🛡️</div>
+    <h1>LEVIATHAN <span>SOC</span></h1>
+    <p>Panel de configuración — Acceso restringido</p>
+
+    <div class="login-error" id="login-error">Usuario o contraseña incorrectos</div>
+
+    <div class="form-group">
+      <label>Usuario</label>
+      <input type="text" class="form-input" id="login-user" placeholder="admin" autocomplete="username"/>
+    </div>
+    <div class="form-group">
+      <label>Contraseña</label>
+      <input type="password" class="form-input" id="login-pass" placeholder="••••••••" autocomplete="current-password"/>
+    </div>
+    <button class="btn-primary" onclick="doLogin()">Ingresar</button>
+  </div>
+</div>
+
+<!-- ── APP ───────────────────────────────────────────────────────────────── -->
+<div id="app">
+
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-logo">LEVIATHAN <span>SOC</span></div>
+      <div class="topbar-sub">// Panel de Configuración</div>
+    </div>
+    <div class="topbar-right">
+      <a href="index.html" class="btn-home">← Portal</a>
+      <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <div class="nav-tabs">
+      <button class="nav-tab active" onclick="showTab('rules')">Reglas de Alerta</button>
+      <button class="nav-tab" onclick="showTab('new-rule')">+ Nueva Regla</button>
+      <button class="nav-tab" onclick="showTab('log')">Historial de Alertas</button>
+      <button class="nav-tab" onclick="showTab('smtp')">Configuración SMTP</button>
+    </div>
+
+    <!-- ── TAB: REGLAS ──────────────────────────────────────────────────── -->
+    <div class="tab-pane active" id="tab-rules">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Reglas configuradas</div>
+          <button class="btn btn-accent" onclick="showTab('new-rule')">+ Nueva regla</button>
+        </div>
+        <div class="table-wrap">
+          <table id="rules-table">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Módulo</th>
+                <th>Condición</th>
+                <th>Destinatarios</th>
+                <th>Cooldown</th>
+                <th>Último envío</th>
+                <th>Activa</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="rules-body">
+              <tr><td colspan="8"><div class="empty-state"><div class="empty-icon">📋</div>Cargando reglas...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TAB: NUEVA REGLA ─────────────────────────────────────────────── -->
+    <div class="tab-pane" id="tab-new-rule">
+      <div class="panel">
+        <div class="panel-title">Nueva regla de alerta</div>
+
+        <div style="margin-top:20px">
+          <div class="form-grid">
+            <div class="field form-full">
+              <label>Nombre de la regla</label>
+              <input type="text" id="r-name" placeholder="Ej: Virus detectado en Fortinet"/>
+            </div>
+
+            <div class="field">
+              <label>Módulo</label>
+              <select id="r-module" onchange="updateConditionOptions()">
+                <option value="sentinel">SentinelOne</option>
+                <option value="fortinet">Fortinet Threats</option>
+                <option value="snyk">Snyk</option>
+                <option value="nmap">Nmap</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>Campo a evaluar</label>
+              <select id="r-field" onchange="updateValueOptions()">
+                <option value="classification">Clasificación</option>
+                <option value="severity">Severidad</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>Valor que dispara la alerta</label>
+              <select id="r-value">
+                <option value="suspicious">suspicious</option>
+                <option value="blocked">blocked</option>
+                <option value="critical">critical</option>
+                <option value="high">high</option>
+                <option value="login_failure">login_failure</option>
+                <option value="alert">alert</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>Cooldown (minutos entre alertas)</label>
+              <input type="number" id="r-cooldown" value="60" min="5" max="1440"/>
+              <span class="field-hint">Evita spam — mínimo 5 minutos</span>
+            </div>
+
+            <div class="field form-full">
+              <label>Asunto del correo</label>
+              <input type="text" id="r-subject" placeholder="Ej: [SOC ALERTA] Virus detectado en Fortinet"/>
+            </div>
+
+            <div class="field form-full">
+              <label>Destinatarios (uno por línea)</label>
+              <textarea id="r-recipients" placeholder="admin@empresa.com&#10;seguridad@empresa.com"></textarea>
+              <span class="field-hint">Escribe un email por línea</span>
+            </div>
+
+          </div>
+
+          <div class="btn-row">
+            <button class="btn btn-muted" onclick="showTab('rules')">Cancelar</button>
+            <button class="btn btn-green" onclick="saveRule()">Guardar regla</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TAB: LOG ─────────────────────────────────────────────────────── -->
+    <div class="tab-pane" id="tab-log">
+      <div class="panel">
+        <div class="panel-title">Historial de alertas enviadas</div>
+        <div class="table-wrap" style="margin-top:16px">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Regla</th>
+                <th>Módulo</th>
+                <th>Destinatarios</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="log-body">
+              <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">📜</div>Cargando historial...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TAB: SMTP ─────────────────────────────────────────────────────── -->
+    <div class="tab-pane" id="tab-smtp">
+      <div class="panel">
+        <div class="panel-title">Configuración del servidor de correo</div>
+        <p style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);margin-top:16px;margin-bottom:20px">
+          La configuración SMTP se gestiona desde el archivo <strong style="color:var(--accent)">.env</strong> en el servidor.
+          Agrega o edita estas variables:
+        </p>
+
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:20px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:2;color:var(--text)">
+          <div><span style="color:var(--muted)"># Servidor SMTP</span></div>
+          <div><span style="color:var(--accent)">SMTP_HOST</span>=<span style="color:var(--yellow)">mail.tuempresa.com</span></div>
+          <div><span style="color:var(--accent)">SMTP_PORT</span>=<span style="color:var(--yellow)">587</span></div>
+          <div><span style="color:var(--accent)">SMTP_USER</span>=<span style="color:var(--yellow)">soc@tuempresa.com</span></div>
+          <div><span style="color:var(--accent)">SMTP_PASSWORD</span>=<span style="color:var(--yellow)">tu_password</span></div>
+          <div><span style="color:var(--accent)">SMTP_FROM</span>=<span style="color:var(--yellow)">SOC Leviathan &lt;soc@tuempresa.com&gt;</span></div>
+          <div><span style="color:var(--accent)">SMTP_TLS</span>=<span style="color:var(--yellow)">true</span></div>
+          <div style="margin-top:12px"><span style="color:var(--muted)"># URL del portal SOC (para links en los mails)</span></div>
+          <div><span style="color:var(--accent)">SOC_URL</span>=<span style="color:var(--yellow)">10.1.108.82:8888</span></div>
+          <div style="margin-top:12px"><span style="color:var(--muted)"># Credenciales del panel de config</span></div>
+          <div><span style="color:var(--accent)">CONFIG_USER</span>=<span style="color:var(--yellow)">admin</span></div>
+          <div><span style="color:var(--accent)">CONFIG_PASSWORD</span>=<span style="color:var(--yellow)">tu_password_seguro</span></div>
+        </div>
+
+        <div style="margin-top:20px">
+          <button class="btn btn-accent" onclick="testSmtp()">Enviar correo de prueba</button>
+          <span id="smtp-test-result" style="font-family:'JetBrains Mono',monospace;font-size:12px;margin-left:14px;color:var(--muted)"></span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ─── AUTH ─────────────────────────────────────────────────────────────────────
+const SESSION_KEY = 'soc_config_auth';
+
+function doLogin() {
+  const user = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value;
+
+  // Verificar credenciales contra la API
+  fetch('/api/config/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: user, password: pass }),
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.ok) {
+      sessionStorage.setItem(SESSION_KEY, data.token);
+      showApp();
+    } else {
+      document.getElementById('login-error').style.display = 'block';
+    }
+  })
+  .catch(() => {
+    document.getElementById('login-error').style.display = 'block';
+  });
+}
+
+function doLogout() {
+  sessionStorage.removeItem(SESSION_KEY);
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-pass').value = '';
+}
+
+function getToken() { return sessionStorage.getItem(SESSION_KEY) || ''; }
+
+function authHeaders() {
+  return { 'Content-Type': 'application/json', 'X-SOC-Token': getToken() };
+}
+
+function showApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  loadRules();
+  loadLog();
+}
+
+// Verificar sesión al cargar
+window.addEventListener('load', () => {
+  const token = sessionStorage.getItem(SESSION_KEY);
+  if (token) showApp();
+
+  // Enter en login
+  document.getElementById('login-pass').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+});
+
+// ─── TABS ─────────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.className = 'tab-pane');
+  document.querySelectorAll('.nav-tab').forEach(t => t.className = 'nav-tab');
+  document.getElementById('tab-' + name).className = 'tab-pane active';
+  const tabs = ['rules','new-rule','log','smtp'];
+  document.querySelectorAll('.nav-tab')[tabs.indexOf(name)].className = 'nav-tab active';
+}
+
+// ─── TOAST ────────────────────────────────────────────────────────────────────
+function showToast(msg, type='success') {
+  const el = document.getElementById('toast');
+  el.textContent = (type === 'success' ? '✓ ' : '✗ ') + msg;
+  el.className = `toast ${type}`;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 3500);
+}
+
+// ─── OPCIONES DINÁMICAS ───────────────────────────────────────────────────────
+const MODULE_OPTIONS = {
+  sentinel: {
+    fields: ['classification', 'severity'],
+    values: {
+      classification: ['Ransomware','Trojan','Malware','Exploit','PUA','Suspicious Activity'],
+      severity:       ['critical','high','medium','low'],
+    }
+  },
+  fortinet: {
+    fields: ['classification', 'source'],
+    values: {
+      classification: ['suspicious','blocked','login_failure','critical','alert'],
+      source:         ['traffic','webfilter','ips','event','vpn'],
+    }
+  },
+  snyk: {
+    fields: ['severity'],
+    values: {
+      severity: ['critical','high','medium','low'],
+    }
+  },
+  nmap: {
+    fields: ['severity'],
+    values: {
+      severity: ['critical','high','medium','low'],
+    }
+  },
+};
+
+function updateConditionOptions() {
+  const mod    = document.getElementById('r-module').value;
+  const opts   = MODULE_OPTIONS[mod] || { fields: ['classification'], values: { classification: [] } };
+  const fSel   = document.getElementById('r-field');
+  fSel.innerHTML = opts.fields.map(f => `<option value="${f}">${f}</option>`).join('');
+  updateValueOptions();
+}
+
+function updateValueOptions() {
+  const mod   = document.getElementById('r-module').value;
+  const field = document.getElementById('r-field').value;
+  const opts  = MODULE_OPTIONS[mod]?.values?.[field] || [];
+  const vSel  = document.getElementById('r-value');
+  vSel.innerHTML = opts.map(v => `<option value="${v}">${v}</option>`).join('');
+}
+
+// ─── CRUD REGLAS ──────────────────────────────────────────────────────────────
+async function loadRules() {
+  try {
+    const res  = await fetch('/api/config/rules', { headers: authHeaders() });
+    const data = await res.json();
+    renderRules(data.rules || []);
+  } catch(e) {
+    console.error('Error cargando reglas:', e);
+  }
+}
+
+function moduleBadge(m) {
+  const colors = { sentinel:'badge-red', fortinet:'badge-orange', snyk:'badge-yellow', nmap:'badge-blue' };
+  return `<span class="badge ${colors[m]||'badge-blue'}">${m}</span>`;
+}
+
+function renderRules(rules) {
+  const tbody = document.getElementById('rules-body');
+  if (!rules.length) {
+    tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">📋</div>No hay reglas configuradas.<br/>Crea una nueva regla para empezar.</div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rules.map(r => `
+    <tr>
+      <td><strong>${esc(r.name)}</strong></td>
+      <td>${moduleBadge(r.module)}</td>
+      <td style="color:var(--accent)">${esc(r.condition_field)} = <strong>${esc(r.condition_value)}</strong></td>
+      <td style="color:var(--muted)">${(r.recipients||[]).join(', ')}</td>
+      <td>${r.cooldown_minutes} min</td>
+      <td style="color:var(--muted);font-size:10px">${r.last_sent_at ? new Date(r.last_sent_at).toLocaleString('es-MX') : 'Nunca'}</td>
+      <td>
+        <label class="toggle">
+          <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRule(${r.id}, this.checked)"/>
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
+      <td>
+        <button class="btn btn-red" style="padding:5px 12px;font-size:10px" onclick="deleteRule(${r.id}, '${esc(r.name)}')">Eliminar</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function saveRule() {
+  const name       = document.getElementById('r-name').value.trim();
+  const module_    = document.getElementById('r-module').value;
+  const field      = document.getElementById('r-field').value;
+  const value      = document.getElementById('r-value').value;
+  const cooldown   = parseInt(document.getElementById('r-cooldown').value) || 60;
+  const subject    = document.getElementById('r-subject').value.trim();
+  const recipients = document.getElementById('r-recipients').value
+    .split('\n').map(e => e.trim()).filter(Boolean);
+
+  if (!name || !subject || !recipients.length) {
+    showToast('Completa todos los campos requeridos', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/config/rules', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name, module: module_, condition_field: field, condition_value: value, cooldown_minutes: cooldown, subject, recipients }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast('Regla creada correctamente');
+      // Limpiar form
+      ['r-name','r-subject','r-recipients'].forEach(id => document.getElementById(id).value = '');
+      document.getElementById('r-cooldown').value = '60';
+      showTab('rules');
+      loadRules();
+    } else {
+      showToast(data.error || 'Error al guardar', 'error');
+    }
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  }
+}
+
+async function toggleRule(id, enabled) {
+  try {
+    await fetch(`/api/config/rules/${id}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ enabled }),
+    });
+    showToast(enabled ? 'Regla activada' : 'Regla desactivada');
+  } catch(e) {
+    showToast('Error al actualizar', 'error');
+  }
+}
+
+async function deleteRule(id, name) {
+  if (!confirm(`¿Eliminar la regla "${name}"?`)) return;
+  try {
+    await fetch(`/api/config/rules/${id}`, { method: 'DELETE', headers: authHeaders() });
+    showToast('Regla eliminada');
+    loadRules();
+  } catch(e) {
+    showToast('Error al eliminar', 'error');
+  }
+}
+
+// ─── LOG ──────────────────────────────────────────────────────────────────────
+async function loadLog() {
+  try {
+    const res  = await fetch('/api/config/alert-log', { headers: authHeaders() });
+    const data = await res.json();
+    const tbody = document.getElementById('log-body');
+    const logs  = data.logs || [];
+
+    if (!logs.length) {
+      tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">📜</div>Sin alertas enviadas aún.</div></td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = logs.map(l => `
+      <tr class="log-row">
+        <td>${new Date(l.sent_at).toLocaleString('es-MX')}</td>
+        <td>${esc(l.rule_name)}</td>
+        <td>${moduleBadge(l.module)}</td>
+        <td style="color:var(--muted)">${(l.recipients||[]).join(', ')}</td>
+        <td><span class="badge ${l.status==='sent'?'badge-green':'badge-red'}">${l.status}</span></td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    console.error('Error cargando log:', e);
+  }
+}
+
+// ─── SMTP TEST ────────────────────────────────────────────────────────────────
+async function testSmtp() {
+  const el = document.getElementById('smtp-test-result');
+  el.textContent = 'Enviando...';
+  try {
+    const res  = await fetch('/api/config/test-smtp', { method: 'POST', headers: authHeaders() });
+    const data = await res.json();
+    el.textContent = data.ok ? '✓ Correo enviado correctamente' : '✗ Error: ' + data.error;
+    el.style.color = data.ok ? 'var(--green)' : 'var(--red)';
+  } catch(e) {
+    el.textContent = '✗ Error de conexión';
+    el.style.color = 'var(--red)';
+  }
+}
+
+// ─── UTILS ────────────────────────────────────────────────────────────────────
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Alerta de Seguridad — SOC</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      padding: 32px 16px;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+    }
+
+    /* HEADER — color cambia según severidad */
+    .header {
+      background: linear-gradient(135deg, {{HEADER_COLOR_1}} 0%, {{HEADER_COLOR_2}} 100%);
+      padding: 32px 40px;
+      text-align: center;
+    }
+
+    .severity-icon { font-size: 48px; margin-bottom: 12px; display: block; }
+
+    .header-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 999px;
+      padding: 5px 16px;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.9);
+      margin-bottom: 14px;
+    }
+
+    .header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.3;
+    }
+
+    /* ALERT SUMMARY */
+    .alert-summary {
+      background: {{SUMMARY_BG}};
+      border-left: 4px solid {{SUMMARY_BORDER}};
+      margin: 0;
+      padding: 16px 40px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .alert-summary-icon { font-size: 22px; flex-shrink: 0; }
+
+    .alert-summary-text strong {
+      display: block;
+      font-size: 14px;
+      color: {{SUMMARY_TEXT_STRONG}};
+      margin-bottom: 3px;
+    }
+
+    .alert-summary-text span {
+      font-size: 13px;
+      color: {{SUMMARY_TEXT}};
+    }
+
+    /* BODY */
+    .body { padding: 28px 40px; }
+
+    .body p {
+      font-size: 14px;
+      color: #444;
+      line-height: 1.75;
+      margin-bottom: 14px;
+    }
+
+    /* DETECTION CARD */
+    .detection-card {
+      background: #f7f9fc;
+      border: 1px solid #e0e6f0;
+      border-radius: 10px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+
+    .detection-card h3 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #8a9bb5;
+      margin-bottom: 14px;
+      font-weight: 700;
+    }
+
+    .detection-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 8px 0;
+      border-bottom: 1px solid #eaeff7;
+      font-size: 13px;
+      gap: 16px;
+    }
+
+    .detection-row:last-child { border-bottom: none; }
+    .detection-row .label { color: #8a9bb5; flex-shrink: 0; min-width: 120px; }
+    .detection-row .value { color: #1a1a2e; font-weight: 600; text-align: right; word-break: break-all; }
+    .detection-row .value.highlight { color: {{HIGHLIGHT_COLOR}}; }
+
+    /* SEVERITY BADGE */
+    .sev-badge {
+      display: inline-block;
+      padding: 3px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: {{SEV_BADGE_BG}};
+      color: {{SEV_BADGE_TEXT}};
+    }
+
+    /* ACTION REQUIRED */
+    .action-box {
+      background: #fff8f0;
+      border: 1px solid #ffd09b;
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin: 20px 0;
+    }
+
+    .action-box h4 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #c05a00;
+      margin-bottom: 8px;
+    }
+
+    .action-box ul {
+      padding-left: 18px;
+      font-size: 13px;
+      color: #7a4500;
+      line-height: 1.8;
+    }
+
+    /* CTA */
+    .cta-section { text-align: center; margin: 24px 0; }
+
+    .cta-button {
+      display: inline-block;
+      background: linear-gradient(135deg, #1a56db 0%, #0e3fa8 100%);
+      color: #ffffff !important;
+      text-decoration: none;
+      padding: 14px 36px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    /* FOOTER */
+    .footer {
+      background: #f7f9fc;
+      border-top: 1px solid #e8edf5;
+      padding: 20px 40px;
+      text-align: center;
+    }
+
+    .footer p {
+      font-size: 11px;
+      color: #aab;
+      line-height: 1.7;
+    }
+
+    .footer strong { color: #778; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <span class="severity-icon">{{SEVERITY_ICON}}</span>
+    <div class="header-badge">🛡️ Leviathan SOC — Alerta de Seguridad</div>
+    <h1>{{ALERT_TITLE}}</h1>
+  </div>
+
+  <!-- ALERT SUMMARY -->
+  <div class="alert-summary">
+    <div class="alert-summary-icon">{{SUMMARY_ICON}}</div>
+    <div class="alert-summary-text">
+      <strong>{{SUMMARY_STRONG}}</strong>
+      <span>{{SUMMARY_DETAIL}}</span>
+    </div>
+  </div>
+
+  <!-- BODY -->
+  <div class="body">
+
+    <p>
+      El sistema de monitoreo <strong>Leviathan SOC</strong> detectó una alerta
+      que requiere tu atención. A continuación encontrarás el detalle completo
+      del evento.
+    </p>
+
+    <!-- DETECTION CARD -->
+    <div class="detection-card">
+      <h3>Detalle del evento</h3>
+      <div class="detection-row">
+        <span class="label">Módulo</span>
+        <span class="value">{{MODULE}}</span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Tipo de alerta</span>
+        <span class="value highlight">{{ALERT_TYPE}}</span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Severidad</span>
+        <span class="value"><span class="sev-badge">{{SEVERITY}}</span></span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Equipo / Origen</span>
+        <span class="value">{{SOURCE_HOST}}</span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Destino</span>
+        <span class="value">{{DESTINATION}}</span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Descripción</span>
+        <span class="value">{{DESCRIPTION}}</span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Fecha y hora</span>
+        <span class="value">{{DATETIME}}</span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Regla activada</span>
+        <span class="value">{{RULE_NAME}}</span>
+      </div>
+    </div>
+
+    <!-- ACTION REQUIRED -->
+    <div class="action-box">
+      <h4>⚡ Acción recomendada</h4>
+      <ul>
+        {{ACTION_ITEMS}}
+      </ul>
+    </div>
+
+    <!-- CTA -->
+    <div class="cta-section">
+      <a href="http://{{SOC_URL}}/index.html" class="cta-button">
+        Ver en el Portal SOC →
+      </a>
+    </div>
+
+    <p style="font-size:13px;color:#666;">
+      Esta alerta fue generada automáticamente por el sistema de monitoreo.
+      Si tienes dudas o crees que es un falso positivo, responde este correo
+      o contáctanos directamente.
+    </p>
+
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <p>
+      <strong>Leviathan SOC Platform</strong> · Departamento de Tecnología<br/>
+      Alerta generada el {{DATETIME}} · Regla: {{RULE_NAME}}<br/>
+      Para no recibir estas alertas contacta al administrador del SOC.
+    </p>
+  </div>
+
+</div>
+</body>
+</html>
