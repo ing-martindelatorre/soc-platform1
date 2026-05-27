@@ -6,15 +6,17 @@ Servidor único del SOC Platform.
 - Sirve todos los dashboards en un solo puerto (8888)
 - Regenera cada dashboard según su frecuencia configurada
 - Publica soc_status.json con datos de salud para el semáforo del index
+- API REST en /api/config/* para el panel de configuración
 """
 
 import json
 import os
+import secrets
 import sys
 import threading
 import time
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -40,11 +42,11 @@ HTTP_PORT = int(os.getenv("DASHBOARD_PORT", "8888"))
 BASE_DIR = Path(__file__).resolve().parent
 
 DASHBOARD_REFRESH = {
-    "sentinel":        int(os.getenv("DASH_REFRESH_SENTINEL",        "30")),
-    "nmap":            int(os.getenv("DASH_REFRESH_NMAP",            "300")),
-    "fortinet":        int(os.getenv("DASH_REFRESH_FORTINET",        "60")),
-    "fortinet_threats":int(os.getenv("DASH_REFRESH_FORTINET_THREATS","120")),
-    "snyk":            int(os.getenv("DASH_REFRESH_SNYK",            "300")),
+    "sentinel":         int(os.getenv("DASH_REFRESH_SENTINEL",         "30")),
+    "nmap":             int(os.getenv("DASH_REFRESH_NMAP",             "300")),
+    "fortinet":         int(os.getenv("DASH_REFRESH_FORTINET",         "60")),
+    "fortinet_threats": int(os.getenv("DASH_REFRESH_FORTINET_THREATS", "120")),
+    "snyk":             int(os.getenv("DASH_REFRESH_SNYK",             "300")),
 }
 
 # =============================================================================
@@ -57,6 +59,10 @@ MODULE_STATUS: dict[str, dict] = {
     "snyk":     {"last_update": None, "status": "pending", "records": 0, "health": {}},
 }
 _status_lock = threading.Lock()
+
+# Sesiones del panel de configuración
+_sessions: dict[str, datetime] = {}
+SESSION_TTL_HOURS = 8
 
 
 def db_connect():
@@ -79,6 +85,22 @@ def update_status(module: str, status: str, records: int = 0, health: dict = Non
             "records":     records,
             "health":      health or {},
         }
+
+
+def _check_auth(token: str) -> bool:
+    expiry = _sessions.get(token)
+    if not expiry:
+        return False
+    if datetime.now(timezone.utc) > expiry:
+        _sessions.pop(token, None)
+        return False
+    return True
+
+
+def _create_session() -> str:
+    token = secrets.token_hex(32)
+    _sessions[token] = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
+    return token
 
 
 # =============================================================================
@@ -334,17 +356,10 @@ def refresh_fortinet():
 # FORTINET THREATS
 # =============================================================================
 def build_fortinet_threats_data(hours: int = 24) -> dict:
-    """
-    Lee datos de amenazas de fortinet_threats filtrando por período.
-    hours=24  → últimas 24 horas
-    hours=168 → últimos 7 días
-    """
     with db_connect() as conn:
         with conn.cursor() as cur:
-
             interval = f"{hours} hours"
 
-            # Summary con filtro de tiempo
             cur.execute(f"""
                 SELECT source, classification, COUNT(*) AS n
                 FROM fortinet_threats
@@ -362,7 +377,6 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
                     counts[src] = {}
                 counts[src][cls] = n
 
-            # Tráfico
             cur.execute(f"""
                 SELECT srcip, srcname, dstip, dstport, dstcountry,
                        action, app, apprisk, service, policyname,
@@ -375,7 +389,6 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
             """)
             traffic_records = [dict(r) for r in cur.fetchall()]
 
-            # Eventos
             cur.execute(f"""
                 SELECT logdesc, level, action, msg, classification,
                        log_date::text AS log_date, log_time
@@ -386,7 +399,6 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
             """)
             event_records = [dict(r) for r in cur.fetchall()]
 
-            # Webfilter
             cur.execute(f"""
                 SELECT srcip, dstip, hostname, url, catdesc, action, classification,
                        log_date::text AS log_date, log_time
@@ -397,7 +409,6 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
             """)
             webfilter_records = [dict(r) for r in cur.fetchall()]
 
-            # IPS
             cur.execute(f"""
                 SELECT srcip, dstip, action, classification, payload,
                        log_date::text AS log_date, log_time
@@ -408,7 +419,6 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
             """)
             ips_records = [dict(r) for r in cur.fetchall()]
 
-            # VPN
             cur.execute(f"""
                 SELECT srcip, action, level, msg, classification,
                        log_date::text AS log_date, log_time
@@ -419,7 +429,6 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
             """)
             vpn_records = [dict(r) for r in cur.fetchall()]
 
-            # Tráfico sospechoso agrupado por hora (para gráfica de tendencia)
             cur.execute(f"""
                 SELECT
                     DATE_TRUNC('hour', collected_at) AS hora,
@@ -434,10 +443,10 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
             """)
             traffic_over_time = [
                 {
-                    "hora":      str(r["hora"]),
-                    "total":     int(r["total"]),
+                    "hora":       str(r["hora"]),
+                    "total":      int(r["total"]),
                     "suspicious": int(r["suspicious"]),
-                    "blocked":   int(r["blocked"]),
+                    "blocked":    int(r["blocked"]),
                 }
                 for r in cur.fetchall()
             ]
@@ -467,7 +476,7 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
             "total_vpn":          sum(counts.get("vpn", {}).values()),
         },
         "traffic": {
-            "records": traffic_records,
+            "records":   traffic_records,
             "over_time": traffic_over_time,
             "summary": {
                 "total":      sum(tc.values()),
@@ -516,31 +525,23 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
 def refresh_fortinet_threats():
     while True:
         try:
-            # Generar JSON de 24 horas
             data_24h = build_fortinet_threats_data(hours=24)
             (BASE_DIR / "fortinet_threats_data.json").write_text(
                 json.dumps(data_24h, indent=2, ensure_ascii=False, default=str),
                 encoding="utf-8"
             )
-
-            # Generar JSON de 7 días
             data_7d = build_fortinet_threats_data(hours=168)
             (BASE_DIR / "fortinet_threats_data_7d.json").write_text(
                 json.dumps(data_7d, indent=2, ensure_ascii=False, default=str),
                 encoding="utf-8"
             )
-
             total = data_24h["summary"]["total_traffic"]
             susp  = data_24h["summary"]["suspicious_traffic"]
             print(f"[fortinet-threats] OK — 24h: traffic={total}, suspicious={susp} | {now_str()}")
-
         except Exception as e:
             print(f"[fortinet-threats] ERROR: {e}")
         time.sleep(DASHBOARD_REFRESH["fortinet_threats"])
 
-# ─── AGREGAR ESTA FUNCIÓN (nueva) ─────────────────────────────────────────────
-# Llámala desde main() como un thread daemon:
-# threading.Thread(target=cleanup_fortinet_threats, daemon=True, name="forti-cleanup")
 
 def cleanup_fortinet_threats():
     """Borra registros de fortinet_threats con más de 1 año. Corre cada 24 horas."""
@@ -558,7 +559,8 @@ def cleanup_fortinet_threats():
                 print(f"[forti-cleanup] Eliminados {deleted} registros > 1 año | {now_str()}")
         except Exception as e:
             print(f"[forti-cleanup] ERROR: {e}")
-        time.sleep(86400)  # 24 horas
+        time.sleep(86400)
+
 
 # =============================================================================
 # SNYK
@@ -614,19 +616,236 @@ def refresh_index_status():
 
 
 # =============================================================================
-# HTTP SERVER
+# HTTP SERVER — con API REST para el panel de configuración
 # =============================================================================
-class QuietHandler(SimpleHTTPRequestHandler):
+class SOCHandler(SimpleHTTPRequestHandler):
+
     def log_message(self, format, *args):
         if args and len(args) >= 2 and str(args[1]).startswith(("4", "5")):
             super().log_message(format, *args)
 
+    def _get_token(self) -> str:
+        return self.headers.get("X-SOC-Token", "")
+
+    def _send_json(self, data: dict, status: int = 200):
+        body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_body(self) -> dict:
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            return {}
+        return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def _require_auth(self) -> bool:
+        if not _check_auth(self._get_token()):
+            self._send_json({"ok": False, "error": "No autorizado"}, 401)
+            return False
+        return True
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-SOC-Token")
+        self.end_headers()
+
+    def do_GET(self):
+        if self.path.startswith("/api/"):
+            self._handle_api_get()
+        else:
+            super().do_GET()
+
+    def do_POST(self):
+        if self.path.startswith("/api/"):
+            self._handle_api_post()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_PATCH(self):
+        if self.path.startswith("/api/"):
+            self._handle_api_patch()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_DELETE(self):
+        if self.path.startswith("/api/"):
+            self._handle_api_delete()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def _handle_api_get(self):
+        path = self.path.split("?")[0]
+
+        if path == "/api/config/rules":
+            if not self._require_auth():
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT * FROM alert_rules ORDER BY created_at DESC")
+                        rules = [dict(r) for r in cur.fetchall()]
+                self._send_json({"ok": True, "rules": rules})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif path == "/api/config/alert-log":
+            if not self._require_auth():
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT id, rule_name, module, recipients, subject, sent_at, status
+                            FROM alert_log ORDER BY sent_at DESC LIMIT 100
+                        """)
+                        logs = [dict(r) for r in cur.fetchall()]
+                self._send_json({"ok": True, "logs": logs})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        else:
+            self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
+
+    def _handle_api_post(self):
+        path = self.path.split("?")[0]
+
+        if path == "/api/config/login":
+            body     = self._read_body()
+            cfg_user = os.getenv("CONFIG_USER", "admin")
+            cfg_pass = os.getenv("CONFIG_PASSWORD", "admin")
+            if body.get("username") == cfg_user and body.get("password") == cfg_pass:
+                token = _create_session()
+                self._send_json({"ok": True, "token": token})
+            else:
+                self._send_json({"ok": False, "error": "Credenciales incorrectas"}, 401)
+            return
+
+        if not self._require_auth():
+            return
+
+        if path == "/api/config/rules":
+            body     = self._read_body()
+            required = ["name", "module", "condition_field", "condition_value", "recipients", "subject"]
+            if not all(body.get(f) for f in required):
+                self._send_json({"ok": False, "error": "Faltan campos requeridos"}, 400)
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO alert_rules
+                            (name, module, condition_field, condition_value, recipients, subject, cooldown_minutes)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            RETURNING id
+                        """, (
+                            body["name"], body["module"],
+                            body["condition_field"], body["condition_value"],
+                            body["recipients"], body["subject"],
+                            body.get("cooldown_minutes", 60),
+                        ))
+                        rule_id = cur.fetchone()["id"]
+                    conn.commit()
+                self._send_json({"ok": True, "id": rule_id})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif path == "/api/config/test-smtp":
+            try:
+                sys.path.insert(0, str(BASE_DIR.parent))
+                from app.alerts.engine import send_email, build_email_html
+                smtp_user = os.getenv("SMTP_USER", "")
+                if not smtp_user:
+                    self._send_json({"ok": False, "error": "SMTP no configurado en .env"})
+                    return
+                html = build_email_html(
+                    module="sentinel",
+                    rule_name="Test de conexión",
+                    alert_type="test",
+                    severity="info",
+                    source_host="soc-platform",
+                    destination="—",
+                    description="Este es un correo de prueba del sistema SOC Leviathan.",
+                    alert_datetime=now_str(),
+                )
+                ok = send_email([smtp_user], "[SOC] Prueba de conexión SMTP", html)
+                self._send_json({"ok": ok, "error": None if ok else "Error enviando — revisa logs"})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        else:
+            self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
+
+    def _handle_api_patch(self):
+        path = self.path.split("?")[0]
+        if not self._require_auth():
+            return
+        if path.startswith("/api/config/rules/"):
+            rule_id = path.split("/")[-1]
+            body    = self._read_body()
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE alert_rules SET enabled = %s, updated_at = NOW() WHERE id = %s",
+                            (body.get("enabled", True), rule_id)
+                        )
+                    conn.commit()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+        else:
+            self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
+
+    def _handle_api_delete(self):
+        path = self.path.split("?")[0]
+        if not self._require_auth():
+            return
+        if path.startswith("/api/config/rules/"):
+            rule_id = path.split("/")[-1]
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM alert_rules WHERE id = %s", (rule_id,))
+                    conn.commit()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+        else:
+            self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
+
 
 def start_http_server():
     os.chdir(BASE_DIR)
-    server = ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), QuietHandler)
+    server = ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), SOCHandler)
     print(f"[server] Escuchando en http://{HTTP_HOST}:{HTTP_PORT}")
     server.serve_forever()
+
+
+# =============================================================================
+# MOTOR DE ALERTAS
+# =============================================================================
+def run_alert_engine():
+    """Evalúa reglas de alerta cada 5 minutos y envía emails si aplica."""
+    time.sleep(30)
+    while True:
+        try:
+            sys.path.insert(0, str(BASE_DIR.parent))
+            from app.alerts.engine import evaluate_and_send
+            sent = evaluate_and_send()
+            if sent > 0:
+                print(f"[alerts] {sent} alerta(s) enviada(s) | {now_str()}")
+        except Exception as e:
+            print(f"[alerts] ERROR: {e}")
+        time.sleep(300)
 
 
 # =============================================================================
@@ -681,6 +900,7 @@ def main():
         threading.Thread(target=cleanup_fortinet_threats, daemon=True, name="forti-cleanup"),
         threading.Thread(target=refresh_snyk,             daemon=True, name="snyk"),
         threading.Thread(target=refresh_index_status,     daemon=True, name="index-status"),
+        threading.Thread(target=run_alert_engine,         daemon=True, name="alert-engine"),
         threading.Thread(target=start_http_server,        daemon=True, name="http"),
     ]
 
@@ -689,6 +909,7 @@ def main():
         print(f"[thread] {t.name} iniciado")
 
     print(f"\n[OK] Portal disponible en: http://localhost:{HTTP_PORT}/index.html")
+    print(f"[OK] Config panel en:       http://localhost:{HTTP_PORT}/config.html")
     print("[OK] Ctrl+C para salir\n")
 
     try:
