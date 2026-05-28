@@ -60,8 +60,14 @@ def send_email(recipients: list[str], subject: str, html_body: str) -> bool:
         msg["To"]      = ", ".join(recipients)
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-        if smtp_tls:
-            context = ssl.create_default_context()
+        context = ssl.create_default_context()
+        if smtp_port == 465:
+            # SSL directo (puerto 465)
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context) as server:
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_from, recipients, msg.as_string())
+        elif smtp_tls:
+            # STARTTLS (puerto 587)
             with smtplib.SMTP(smtp_host, smtp_port) as server:
                 server.ehlo()
                 server.starttls(context=context)
