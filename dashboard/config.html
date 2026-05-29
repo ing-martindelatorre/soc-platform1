@@ -389,9 +389,23 @@
             </div>
 
             <div class="field">
-              <label>Cooldown (minutos entre alertas)</label>
+              <label>Tipo de condición</label>
+              <select id="r-condition-type" onchange="toggleThreshold()">
+                <option value="match">Coincidencia exacta — cualquier evento dispara</option>
+                <option value="threshold">Umbral de cantidad — solo si supera el mínimo</option>
+              </select>
+            </div>
+
+            <div class="field" id="r-threshold-wrap" style="display:none">
+              <label>Mínimo de eventos para disparar</label>
+              <input type="number" id="r-threshold" value="10" min="1" max="100000"/>
+              <span class="field-hint">Ej: 50 = alerta solo si hay ≥ 50 eventos del mismo tipo</span>
+            </div>
+
+            <div class="field">
+              <label>Cooldown (minutos entre alertas por entidad)</label>
               <input type="number" id="r-cooldown" value="60" min="5" max="1440"/>
-              <span class="field-hint">Evita spam — mínimo 5 minutos</span>
+              <span class="field-hint">Misma IP / máquina no vuelve a alertar hasta que pase este tiempo</span>
             </div>
 
             <div class="field form-full">
@@ -490,6 +504,7 @@ function doLogin() {
   .then(data => {
     if (data.ok) {
       sessionStorage.setItem(SESSION_KEY, data.token);
+      document.cookie = 'soc_session=' + data.token + '; path=/; SameSite=Strict';
       showApp();
     } else {
       document.getElementById('login-error').style.display = 'block';
@@ -502,6 +517,7 @@ function doLogin() {
 
 function doLogout() {
   sessionStorage.removeItem(SESSION_KEY);
+  document.cookie = 'soc_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Strict';
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('login-pass').value = '';
@@ -639,14 +655,21 @@ function renderRules(rules) {
   `).join('');
 }
 
+function toggleThreshold() {
+  const type = document.getElementById('r-condition-type').value;
+  document.getElementById('r-threshold-wrap').style.display = type === 'threshold' ? '' : 'none';
+}
+
 async function saveRule() {
-  const name       = document.getElementById('r-name').value.trim();
-  const module_    = document.getElementById('r-module').value;
-  const field      = document.getElementById('r-field').value;
-  const value      = document.getElementById('r-value').value;
-  const cooldown   = parseInt(document.getElementById('r-cooldown').value) || 60;
-  const subject    = document.getElementById('r-subject').value.trim();
-  const recipients = document.getElementById('r-recipients').value
+  const name           = document.getElementById('r-name').value.trim();
+  const module_        = document.getElementById('r-module').value;
+  const field          = document.getElementById('r-field').value;
+  const value          = document.getElementById('r-value').value;
+  const cooldown       = parseInt(document.getElementById('r-cooldown').value) || 60;
+  const conditionType  = document.getElementById('r-condition-type').value;
+  const thresholdCount = parseInt(document.getElementById('r-threshold').value) || 1;
+  const subject        = document.getElementById('r-subject').value.trim();
+  const recipients     = document.getElementById('r-recipients').value
     .split('\n').map(e => e.trim()).filter(Boolean);
 
   if (!name || !subject || !recipients.length) {
@@ -658,14 +681,21 @@ async function saveRule() {
     const res = await fetch('/api/config/rules', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ name, module: module_, condition_field: field, condition_value: value, cooldown_minutes: cooldown, subject, recipients }),
+      body: JSON.stringify({
+        name, module: module_,
+        condition_field: field, condition_value: value,
+        condition_type: conditionType, threshold_count: thresholdCount,
+        cooldown_minutes: cooldown, subject, recipients,
+      }),
     });
     const data = await res.json();
     if (data.ok) {
       showToast('Regla creada correctamente');
-      // Limpiar form
       ['r-name','r-subject','r-recipients'].forEach(id => document.getElementById(id).value = '');
       document.getElementById('r-cooldown').value = '60';
+      document.getElementById('r-condition-type').value = 'match';
+      document.getElementById('r-threshold').value = '10';
+      toggleThreshold();
       showTab('rules');
       loadRules();
     } else {

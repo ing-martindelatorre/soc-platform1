@@ -36,17 +36,16 @@ class NmapPipeline:
         return run_nmap_pipeline(**kwargs)
 
 
-def run_nmap_pipeline(targets_file: str | Path | None = None, **kwargs) -> dict[str, Any]:
+def run_nmap_pipeline(
+    targets_file: str | Path | None = None,
+    profile_override: str | None = None,
+    **kwargs,
+) -> dict[str, Any]:
     """
-    Pipeline completo de Nmap:
-      1. Carga targets desde archivo
-      2. Ejecuta nmap por cada target → XML
-      3. Parsea XML a estructura normalizada
-      4. Enriquece con hallazgos (severity, categoría, recomendaciones)
-      5. Carga a PostgreSQL (nmap_assets, nmap_services, nmap_findings)
-      6. Guarda resumen JSON en disco
+    Pipeline completo de Nmap.
 
-    Retorna un dict con el resumen de la ejecución.
+    profile_override: si se indica, todos los targets usan ese perfil en lugar
+                      del definido en el archivo (ej: "quick", "full_tcp", "vuln").
     """
     targets = load_nmap_targets(targets_file)
 
@@ -66,7 +65,7 @@ def run_nmap_pipeline(targets_file: str | Path | None = None, **kwargs) -> dict[
     for item in targets:
         name    = item["name"]
         target  = item["target"]
-        profile = item["profile"]
+        profile = profile_override or item["profile"]
 
         logger.info(f"Nmap: iniciando scan para {name} ({target}) perfil={profile}")
 

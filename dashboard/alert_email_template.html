@@ -231,11 +231,27 @@
         <span class="value"><span class="sev-badge">{{SEVERITY}}</span></span>
       </div>
       <div class="detection-row">
-        <span class="label">Equipo / Origen</span>
+        <span class="label">Total de eventos</span>
+        <span class="value highlight">{{TOTAL_EVENTS}}</span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Fuentes únicas</span>
+        <span class="value">{{UNIQUE_SOURCES}}</span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Primera detección</span>
+        <span class="value">{{FIRST_SEEN}}</span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Última detección</span>
+        <span class="value">{{LAST_SEEN}}</span>
+      </div>
+      <div class="detection-row">
+        <span class="label">Origen principal</span>
         <span class="value">{{SOURCE_HOST}}</span>
       </div>
       <div class="detection-row">
-        <span class="label">Destino</span>
+        <span class="label">Destino / Extra</span>
         <span class="value">{{DESTINATION}}</span>
       </div>
       <div class="detection-row">
@@ -243,14 +259,13 @@
         <span class="value">{{DESCRIPTION}}</span>
       </div>
       <div class="detection-row">
-        <span class="label">Fecha y hora</span>
-        <span class="value">{{DATETIME}}</span>
-      </div>
-      <div class="detection-row">
         <span class="label">Regla activada</span>
         <span class="value">{{RULE_NAME}}</span>
       </div>
     </div>
+
+    <!-- ENTITIES TABLE (vacío si solo hay 1 entidad) -->
+    {{ENTITIES_TABLE}}
 
     <!-- ACTION REQUIRED -->
     <div class="action-box">

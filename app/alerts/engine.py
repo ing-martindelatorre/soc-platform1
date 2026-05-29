@@ -17,24 +17,11 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Any
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import urllib.request
+
+from app.core.db import get_connection as db_connect
 
 logger = logging.getLogger("soc-platform")
-
-# ============================================================================ =
-# DB
-# =============================================================================
-
-def db_connect():
-    return psycopg2.connect(
-        host=os.environ["DB_HOST"],
-        port=os.environ["DB_PORT"],
-        dbname=os.environ["DB_NAME"],
-        user=os.environ["DB_USER"],
-        password=os.environ["DB_PASSWORD"],
-        cursor_factory=RealDictCursor,
-    )
 
 
 # =============================================================================
@@ -92,6 +79,58 @@ def send_email(recipients: list[str], subject: str, html_body: str) -> bool:
 
 TEMPLATE_PATH = Path(__file__).parent.parent.parent / "dashboard" / "alert_email_template.html"
 
+_SLACK_COLORS = {
+    "critical": "#c0392b", "high": "#c05a00", "suspicious": "#c07d00",
+    "blocked": "#c0392b", "medium": "#8a7200", "login_failure": "#7b00c0",
+}
+
+
+def send_slack_notification(
+    webhook_url: str,
+    module: str,
+    alert_type: str,
+    severity: str,
+    source_host: str,
+    total_events: int,
+    first_seen: str,
+    last_seen: str,
+    rule_name: str,
+) -> bool:
+    """Envía una notificación a Slack via incoming webhook."""
+    color = _SLACK_COLORS.get(severity.lower(), "#1a56db")
+    soc_url = os.getenv("SOC_URL", "localhost:8888")
+
+    payload = {
+        "attachments": [{
+            "color": color,
+            "title": f"🚨 SOC: {alert_type}",
+            "title_link": f"http://{soc_url}/index.html",
+            "fields": [
+                {"title": "Módulo",        "value": MODULE_NAMES.get(module, module), "short": True},
+                {"title": "Severidad",     "value": severity.upper(),                  "short": True},
+                {"title": "Origen",        "value": source_host,                       "short": True},
+                {"title": "Total eventos", "value": f"{total_events:,}",               "short": True},
+                {"title": "Primera det.",  "value": first_seen,                        "short": True},
+                {"title": "Última det.",   "value": last_seen,                         "short": True},
+            ],
+            "footer": f"Leviathan SOC — Regla: {rule_name}",
+            "ts": int(datetime.now(timezone.utc).timestamp()),
+        }]
+    }
+
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req  = urllib.request.Request(
+            webhook_url, data=data,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200
+    except Exception as e:
+        logger.error(f"[alerts] Error enviando Slack: {e}")
+        return False
+
+
 # Colores por severidad/clasificación
 SEVERITY_STYLES = {
     "critical":     {"color1": "#7b0000", "color2": "#c0392b", "icon": "🚨", "summary_bg": "#fff0f0", "summary_border": "#ff4d6d", "badge_bg": "#ff4d6d", "badge_text": "#fff"},
@@ -104,10 +143,11 @@ SEVERITY_STYLES = {
 }
 
 MODULE_NAMES = {
-    "sentinel": "SentinelOne",
-    "fortinet": "Fortinet",
-    "snyk":     "Snyk",
-    "nmap":     "Nmap",
+    "sentinel":  "SentinelOne",
+    "fortinet":  "Fortinet",
+    "snyk":      "Snyk",
+    "nmap":      "Nmap",
+    "scheduler": "Scheduler",
 }
 
 ACTION_ITEMS = {
@@ -131,6 +171,11 @@ ACTION_ITEMS = {
         "Verifica si el puerto/servicio es necesario",
         "Considera cerrar o proteger el servicio expuesto",
     ],
+    "scheduler": [
+        "Revisa los logs del scheduler para ver el traceback completo",
+        "Verifica conectividad con las APIs externas del módulo fallido",
+        "Ejecuta el módulo manualmente: python -m app.cli <modulo>",
+    ],
 }
 
 
@@ -143,6 +188,11 @@ def build_email_html(
     destination: str,
     description: str,
     alert_datetime: str,
+    total_events: int = 1,
+    unique_sources: int = 1,
+    first_seen: str = "",
+    last_seen: str = "",
+    entities_table: str = "",
 ) -> str:
     soc_url  = os.getenv("SOC_URL", "localhost:8888")
     style    = SEVERITY_STYLES.get(severity.lower(), SEVERITY_STYLES["default"])
@@ -153,7 +203,6 @@ def build_email_html(
     try:
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
     except FileNotFoundError:
-        # Template de fallback si no existe el archivo
         template = "<html><body><pre>{{ALERT_TITLE}}\n{{DESCRIPTION}}\n{{DATETIME}}</pre></body></html>"
 
     replacements = {
@@ -165,7 +214,7 @@ def build_email_html(
         "{{SUMMARY_BORDER}}":    style["summary_border"],
         "{{SUMMARY_ICON}}":      style["icon"],
         "{{SUMMARY_STRONG}}":    f"{mod_name}: {alert_type} detectado",
-        "{{SUMMARY_DETAIL}}":    f"Requiere revisión inmediata por parte del equipo de TI",
+        "{{SUMMARY_DETAIL}}":    f"Requiere revisión inmediata — {total_events:,} evento(s) en {unique_sources} fuente(s)",
         "{{SEV_BADGE_BG}}":      style["badge_bg"],
         "{{SEV_BADGE_TEXT}}":    style["badge_text"],
         "{{SUMMARY_TEXT_STRONG}}": style["summary_border"],
@@ -181,11 +230,16 @@ def build_email_html(
         "{{RULE_NAME}}":         rule_name,
         "{{ACTION_ITEMS}}":      action_html,
         "{{SOC_URL}}":           soc_url,
+        "{{TOTAL_EVENTS}}":      f"{total_events:,}",
+        "{{UNIQUE_SOURCES}}":    str(unique_sources),
+        "{{FIRST_SEEN}}":        first_seen or alert_datetime,
+        "{{LAST_SEEN}}":         last_seen or alert_datetime,
+        "{{ENTITIES_TABLE}}":    entities_table,
     }
 
     html = template
-    for key, value in replacements.items():
-        html = html.replace(key, value)
+    for key, val in replacements.items():
+        html = html.replace(key, val)
 
     return html
 
@@ -194,102 +248,303 @@ def build_email_html(
 # Evaluador de reglas
 # =============================================================================
 
+# Todas las queries devuelven columnas normalizadas:
+#   source_label  — origen único (IP, equipo, repo)
+#   detail        — descripción de la amenaza (threat_name, app, título CVE…)
+#   severity      — nivel de severidad de ese grupo
+#   event_count   — número de eventos agrupados
+#   first_seen    — timestamp más antiguo del grupo
+#   last_seen     — timestamp más reciente del grupo
+#   extra         — dato adicional contextual (país destino, usuario, issue_id…)
 QUERIES = {
     "sentinel": {
         "classification": """
-            SELECT threat_name, agent_name, username, classification, severity, created_at
+            SELECT
+                COALESCE(agent_name, '—')            AS source_label,
+                COALESCE(threat_name, '—')            AS detail,
+                COALESCE(severity, 'unknown')         AS severity,
+                COUNT(*)                              AS event_count,
+                MIN(created_at)                       AS first_seen,
+                MAX(created_at)                       AS last_seen,
+                COALESCE(MAX(username), '—')          AS extra
             FROM sentinel_incidents
             WHERE LOWER(COALESCE(classification,'')) = LOWER(%s)
               AND created_at >= NOW() - INTERVAL '1 hour'
-            ORDER BY created_at DESC LIMIT 5
+            GROUP BY agent_name, threat_name, severity
+            ORDER BY event_count DESC
+            LIMIT 20
         """,
         "severity": """
-            SELECT threat_name, agent_name, username, classification, severity, created_at
+            SELECT
+                COALESCE(agent_name, '—')             AS source_label,
+                COALESCE(classification, 'Unknown')   AS detail,
+                COALESCE(severity, 'unknown')         AS severity,
+                COUNT(*)                              AS event_count,
+                MIN(created_at)                       AS first_seen,
+                MAX(created_at)                       AS last_seen,
+                COALESCE(MAX(username), '—')          AS extra
             FROM sentinel_incidents
             WHERE LOWER(COALESCE(severity,'')) = LOWER(%s)
               AND created_at >= NOW() - INTERVAL '1 hour'
-            ORDER BY created_at DESC LIMIT 5
+            GROUP BY agent_name, classification, severity
+            ORDER BY event_count DESC
+            LIMIT 20
         """,
     },
     "fortinet": {
         "classification": """
-            SELECT srcip, srcname, dstip, dstcountry, app, classification, collected_at
+            SELECT
+                COALESCE(srcname, srcip, '—')         AS source_label,
+                COALESCE(app, classification, '—')    AS detail,
+                classification                        AS severity,
+                COUNT(*)                              AS event_count,
+                MIN(collected_at)                     AS first_seen,
+                MAX(collected_at)                     AS last_seen,
+                COALESCE(MAX(dstcountry), '—')        AS extra
             FROM fortinet_threats
             WHERE classification = %s
               AND collected_at >= NOW() - INTERVAL '1 hour'
-            ORDER BY collected_at DESC LIMIT 5
+            GROUP BY srcname, srcip, app, classification
+            ORDER BY event_count DESC
+            LIMIT 20
         """,
         "source": """
-            SELECT srcip, srcname, dstip, dstcountry, app, classification, collected_at
+            SELECT
+                COALESCE(srcname, srcip, '—')         AS source_label,
+                COALESCE(app, '—')                    AS detail,
+                COALESCE(classification, 'info')      AS severity,
+                COUNT(*)                              AS event_count,
+                MIN(collected_at)                     AS first_seen,
+                MAX(collected_at)                     AS last_seen,
+                COALESCE(MAX(dstcountry), '—')        AS extra
             FROM fortinet_threats
             WHERE source = %s
               AND collected_at >= NOW() - INTERVAL '1 hour'
-            ORDER BY collected_at DESC LIMIT 5
+            GROUP BY srcname, srcip, app, classification
+            ORDER BY event_count DESC
+            LIMIT 20
         """,
     },
     "snyk": {
         "severity": """
-            SELECT repo_name, title, severity, issue_id, created_at
+            SELECT
+                COALESCE(repo_name, '—')              AS source_label,
+                COALESCE(title, '—')                  AS detail,
+                COALESCE(severity, 'unknown')         AS severity,
+                COUNT(*)                              AS event_count,
+                MIN(created_at)                       AS first_seen,
+                MAX(created_at)                       AS last_seen,
+                COALESCE(MAX(issue_id), '—')          AS extra
             FROM snyk_findings
             WHERE LOWER(severity) = LOWER(%s)
               AND created_at >= NOW() - INTERVAL '24 hours'
-            ORDER BY created_at DESC LIMIT 5
+            GROUP BY repo_name, title, severity
+            ORDER BY event_count DESC
+            LIMIT 20
         """,
     },
     "nmap": {
         "severity": """
-            SELECT a.ip, f.title, f.severity, f.category, f.created_at
-            FROM nmap_findings f JOIN nmap_assets a ON f.asset_id = a.id
+            SELECT
+                a.ip                                  AS source_label,
+                COALESCE(f.title, '—')                AS detail,
+                COALESCE(f.severity, 'unknown')       AS severity,
+                COUNT(*)                              AS event_count,
+                MIN(f.created_at)                     AS first_seen,
+                MAX(f.created_at)                     AS last_seen,
+                COALESCE(MAX(f.category), '—')        AS extra
+            FROM nmap_findings f
+            JOIN nmap_assets a ON f.asset_id = a.id
             WHERE LOWER(f.severity) = LOWER(%s)
               AND f.created_at >= NOW() - INTERVAL '6 hours'
-            ORDER BY f.created_at DESC LIMIT 5
+            GROUP BY a.ip, f.title, f.severity
+            ORDER BY event_count DESC
+            LIMIT 20
         """,
     },
 }
 
+_SEVERITY_RANK = {
+    "critical": 5, "high": 4, "suspicious": 4, "blocked": 4,
+    "medium": 3, "login_failure": 3, "low": 2, "default": 1,
+}
 
-def _format_trigger_data(module: str, rows: list[dict]) -> tuple[str, str, str, str]:
-    """Extrae source_host, destination, description y severity de los rows."""
+
+def _dedup_key(rule_id: int, row: dict) -> str:
+    return f"r{rule_id}:{row.get('source_label','—')}:{row.get('detail','—')}"
+
+
+def _build_alert_context(rows: list[dict]) -> dict:
+    """Construye un resumen agregado a partir de las filas normalizadas."""
     if not rows:
-        return "—", "—", "Sin detalles", "info"
+        return {
+            "source_host": "—", "destination": "—", "description": "Sin detalles",
+            "severity": "info", "total_events": 0, "unique_sources": 0,
+            "first_seen": "—", "last_seen": "—",
+        }
 
-    r = rows[0]
+    total_events   = sum(int(r.get("event_count", 1)) for r in rows)
+    sources        = [r.get("source_label", "—") for r in rows]
+    unique_sources = len(set(sources))
 
-    if module == "sentinel":
-        return (
-            r.get("agent_name") or "—",
-            "—",
-            r.get("threat_name") or "—",
-            r.get("severity") or "info",
+    # Fila más importante: mayor severidad → mayor count
+    top = max(rows, key=lambda r: (
+        _SEVERITY_RANK.get(str(r.get("severity", "")).lower(), 0),
+        int(r.get("event_count", 0)),
+    ))
+
+    # Hasta 3 fuentes únicas en el resumen
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for s in sources:
+        if s not in seen:
+            seen.add(s)
+            ordered.append(s)
+        if len(ordered) == 3:
+            break
+    source_host = ", ".join(ordered)
+    if unique_sources > 3:
+        source_host += f" (+{unique_sources - 3} más)"
+
+    first_seen = str(min((r["first_seen"] for r in rows if r.get("first_seen")), default="—"))
+    last_seen  = str(max((r["last_seen"]  for r in rows if r.get("last_seen")),  default="—"))
+
+    return {
+        "source_host":    source_host,
+        "destination":    top.get("extra", "—"),
+        "description":    top.get("detail", "—"),
+        "severity":       str(top.get("severity", "info")),
+        "total_events":   total_events,
+        "unique_sources": unique_sources,
+        "first_seen":     first_seen[:19],
+        "last_seen":      last_seen[:19],
+    }
+
+
+def _generate_entities_table(rows: list[dict]) -> str:
+    """Genera una tabla HTML con todas las entidades afectadas."""
+    if len(rows) <= 1:
+        return ""
+
+    td  = "padding:7px 10px;font-size:12px;border-bottom:1px solid #eaeff7;color:#1a1a2e;vertical-align:top"
+    tdr = td + ";text-align:right;white-space:nowrap"
+    th  = "padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#8a9bb5;background:#f7f9fc;font-weight:700"
+    thr = th + ";text-align:right"
+
+    body = ""
+    for r in rows:
+        count  = int(r.get("event_count", 1))
+        src    = str(r.get("source_label", "—"))
+        detail = str(r.get("detail", "—"))[:60]
+        first  = str(r.get("first_seen", "—"))[:16]
+        last_  = str(r.get("last_seen",  "—"))[:16]
+        body += (
+            f"<tr>"
+            f"<td style='{td}'>{src}</td>"
+            f"<td style='{td}'>{detail}</td>"
+            f"<td style='{tdr}'><strong>{count:,}</strong></td>"
+            f"<td style='{tdr}'>{first}</td>"
+            f"<td style='{tdr}'>{last_}</td>"
+            f"</tr>"
         )
-    elif module == "fortinet":
-        return (
-            r.get("srcname") or r.get("srcip") or "—",
-            f"{r.get('dstip','—')} ({r.get('dstcountry','?')})",
-            r.get("app") or r.get("classification") or "—",
-            r.get("classification") or "info",
+
+    return (
+        f"<div style='margin:20px 0;border:1px solid #e0e6f0;border-radius:10px;overflow:hidden'>"
+        f"<table style='width:100%;border-collapse:collapse'>"
+        f"<thead><tr>"
+        f"<th style='{th}'>Origen</th>"
+        f"<th style='{th}'>Detalle</th>"
+        f"<th style='{thr}'>Eventos</th>"
+        f"<th style='{thr}'>Primera det.</th>"
+        f"<th style='{thr}'>Última det.</th>"
+        f"</tr></thead>"
+        f"<tbody>{body}</tbody>"
+        f"</table></div>"
+    )
+
+
+# Cooldown en memoria para alertas de fallos de pipeline (se resetea al reiniciar)
+_pipeline_failure_cooldown: dict[str, datetime] = {}
+PIPELINE_ALERT_COOLDOWN_MINUTES = int(os.getenv("PIPELINE_ALERT_COOLDOWN", "60"))
+
+
+def evaluate_job_failures() -> int:
+    """
+    Busca pipelines que fallaron en los últimos 10 minutos y envía alertas por email.
+    Requiere PIPELINE_ALERT_RECIPIENTS en .env (lista separada por comas).
+    Retorna el número de alertas enviadas.
+    """
+    recipients_raw = os.getenv("PIPELINE_ALERT_RECIPIENTS", "")
+    if not recipients_raw:
+        return 0
+
+    recipients = [r.strip() for r in recipients_raw.split(",") if r.strip()]
+    if not recipients:
+        return 0
+
+    sent = 0
+    now  = datetime.now(timezone.utc)
+
+    try:
+        conn = db_connect()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT ON (job_name) job_name, message, started_at
+            FROM job_runs
+            WHERE status = 'failed'
+              AND started_at >= NOW() - INTERVAL '10 minutes'
+            ORDER BY job_name, started_at DESC
+        """)
+        failures = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"[alerts] Error leyendo job_runs: {e}")
+        return 0
+
+    for row in failures:
+        job_name = row["job_name"]
+
+        last = _pipeline_failure_cooldown.get(job_name)
+        if last and (now - last) < timedelta(minutes=PIPELINE_ALERT_COOLDOWN_MINUTES):
+            continue
+
+        error_preview = (row.get("message") or "Sin detalles")[:400]
+        alert_datetime = str(row.get("started_at", now))
+
+        html = build_email_html(
+            module="scheduler",
+            rule_name="Pipeline failure",
+            alert_type=f"Fallo en pipeline: {job_name}",
+            severity="high",
+            source_host="soc-platform",
+            destination="—",
+            description=error_preview,
+            alert_datetime=alert_datetime,
         )
-    elif module == "snyk":
-        return (
-            r.get("repo_name") or "—",
-            "—",
-            r.get("title") or "—",
-            r.get("severity") or "info",
-        )
-    elif module == "nmap":
-        return (
-            r.get("ip") or "—",
-            "—",
-            r.get("title") or "—",
-            r.get("severity") or "info",
-        )
-    return "—", "—", "—", "info"
+
+        ok = send_email(recipients, f"[SOC] Pipeline fallido: {job_name}", html)
+        if ok:
+            _pipeline_failure_cooldown[job_name] = now
+            sent += 1
+            logger.info(f"[alerts] Alerta de fallo enviada para job: {job_name}")
+
+    return sent
 
 
 def evaluate_and_send() -> int:
     """
-    Evalúa todas las reglas activas y envía alertas si corresponde.
-    Retorna el número de alertas enviadas.
+    Evalúa todas las reglas activas con deduplicación por entidad.
+
+    Lógica de dedup:
+      - Cada evento se agrupa por (origen, detalle) en la query.
+      - Se computa un dedup_key por grupo: "r{rule_id}:{source_label}:{detail}"
+      - Si ese dedup_key ya fue alertado en alert_log dentro de la ventana
+        cooldown_minutes, se omite esa entidad.
+      - Si quedan entidades nuevas se envía UN solo correo con todas agrupadas.
+      - Se registra una fila en alert_log por entidad nueva (no por email).
+
+    Retorna el número de emails enviados.
     """
     sent = 0
 
@@ -301,68 +556,122 @@ def evaluate_and_send() -> int:
         rules = cur.fetchall()
 
         for rule in rules:
-            rule_id    = rule["id"]
-            module     = rule["module"]
-            field      = rule["condition_field"]
-            value      = rule["condition_value"]
-            cooldown   = rule["cooldown_minutes"]
-            last_sent  = rule["last_sent_at"]
+            rule_id         = rule["id"]
+            module          = rule["module"]
+            field           = rule["condition_field"]
+            value           = rule["condition_value"]
+            cooldown        = rule["cooldown_minutes"]
+            condition_type  = rule.get("condition_type", "match")
+            threshold_count = int(rule.get("threshold_count") or 1)
 
-            # Verificar cooldown
-            if last_sent:
-                elapsed = datetime.now(timezone.utc) - last_sent
-                if elapsed < timedelta(minutes=cooldown):
-                    continue
-
-            # Buscar eventos que cumplan la condición
+            # ── 1. Obtener eventos agregados ───────────────────────────────────
             query = QUERIES.get(module, {}).get(field)
             if not query:
                 logger.warning(f"[alerts] Sin query para {module}.{field}")
                 continue
 
             cur.execute(query, (value,))
-            rows = [dict(r) for r in cur.fetchall()]
+            all_rows = [dict(r) for r in cur.fetchall()]
 
-            if not rows:
+            if not all_rows:
                 continue
 
-            # Construir email
-            source_host, destination, description, severity = _format_trigger_data(module, rows)
+            # ── 1b. Verificar umbral de cantidad (condition_type = threshold) ──
+            if condition_type == "threshold":
+                total = sum(int(r.get("event_count", 0)) for r in all_rows)
+                if total < threshold_count:
+                    logger.debug(
+                        f"[alerts] Regla {rule_id}: umbral no alcanzado ({total}/{threshold_count})"
+                    )
+                    continue
+
+            # ── 2. Deduplicar por entidad contra alert_log ─────────────────────
+            dedup_keys = [_dedup_key(rule_id, r) for r in all_rows]
+            cur.execute(
+                """
+                SELECT DISTINCT dedup_key FROM alert_log
+                WHERE dedup_key = ANY(%s)
+                  AND sent_at >= NOW() - make_interval(mins => %s)
+                  AND status = 'sent'
+                """,
+                (dedup_keys, cooldown),
+            )
+            already_alerted = {row["dedup_key"] for row in cur.fetchall()}
+
+            new_rows = [
+                r for r in all_rows
+                if _dedup_key(rule_id, r) not in already_alerted
+            ]
+
+            if not new_rows:
+                logger.debug(f"[alerts] Regla {rule_id} ({module}.{field}={value}): todas las entidades ya alertadas")
+                continue
+
+            # ── 3. Construir email con contexto agregado ───────────────────────
+            ctx            = _build_alert_context(new_rows)
+            entities_table = _generate_entities_table(new_rows)
             alert_datetime = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
             html = build_email_html(
                 module=module,
                 rule_name=rule["name"],
                 alert_type=value,
-                severity=severity,
-                source_host=source_host,
-                destination=destination,
-                description=description,
+                severity=ctx["severity"],
+                source_host=ctx["source_host"],
+                destination=ctx["destination"],
+                description=ctx["description"],
                 alert_datetime=alert_datetime,
+                total_events=ctx["total_events"],
+                unique_sources=ctx["unique_sources"],
+                first_seen=ctx["first_seen"],
+                last_seen=ctx["last_seen"],
+                entities_table=entities_table,
             )
 
-            # Enviar email
+            # ── 4. Enviar email y Slack ────────────────────────────────────────
             recipients = list(rule["recipients"])
-            success = send_email(recipients, rule["subject"], html)
-            status  = "sent" if success else "failed"
+            success    = send_email(recipients, rule["subject"], html)
+            status     = "sent" if success else "failed"
 
-            # Registrar en log
-            cur.execute(
-                """
-                INSERT INTO alert_log (rule_id, rule_name, module, recipients, subject, trigger_data, status)
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)
-                """,
-                (rule_id, rule["name"], module, recipients, rule["subject"],
-                 json.dumps([dict(r) for r in rows], default=str), status),
-            )
+            slack_url = os.getenv("SLACK_WEBHOOK_URL", "")
+            if slack_url and success:
+                send_slack_notification(
+                    webhook_url=slack_url,
+                    module=module,
+                    alert_type=value,
+                    severity=ctx["severity"],
+                    source_host=ctx["source_host"],
+                    total_events=ctx["total_events"],
+                    first_seen=ctx["first_seen"],
+                    last_seen=ctx["last_seen"],
+                    rule_name=rule["name"],
+                )
 
-            # Actualizar last_sent_at
+            # ── 5. Registrar una fila por entidad nueva en alert_log ──────────
+            for r in new_rows:
+                dk = _dedup_key(rule_id, r)
+                cur.execute(
+                    """
+                    INSERT INTO alert_log
+                        (rule_id, rule_name, module, recipients, subject,
+                         trigger_data, status, dedup_key)
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                    """,
+                    (rule_id, rule["name"], module, recipients, rule["subject"],
+                     json.dumps(dict(r), default=str), status, dk),
+                )
+
+            # ── 6. Actualizar last_sent_at (informativo) ──────────────────────
             if success:
                 cur.execute(
                     "UPDATE alert_rules SET last_sent_at = NOW() WHERE id = %s",
-                    (rule_id,)
+                    (rule_id,),
                 )
                 sent += 1
+                logger.info(
+                    f"[alerts] Regla {rule['name']}: {len(new_rows)} entidad(es) nuevas, "
+                    f"{ctx['total_events']} eventos totales"
+                )
 
         conn.commit()
         cur.close()

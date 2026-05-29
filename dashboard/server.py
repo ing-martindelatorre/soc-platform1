@@ -31,10 +31,13 @@ except ImportError:
 # CONFIG
 # =============================================================================
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
-DB_PORT = int(os.getenv("DB_PORT", "5433"))
-DB_NAME = os.getenv("DB_NAME", "soc_db")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
+DB_NAME = os.getenv("DB_NAME", "soc")
 DB_USER = os.getenv("DB_USER", "soc_user")
 DB_PASS = os.getenv("DB_PASSWORD", "")
+
+# CORS: vacío = solo mismo origen (recomendado para uso interno)
+CORS_ORIGIN = os.getenv("CORS_ORIGIN", "")
 
 HTTP_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
 HTTP_PORT = int(os.getenv("DASHBOARD_PORT", "8888"))
@@ -63,6 +66,9 @@ _status_lock = threading.Lock()
 # Sesiones del panel de configuración
 _sessions: dict[str, datetime] = {}
 SESSION_TTL_HOURS = 8
+
+# Rutas que no requieren autenticación
+_PUBLIC_PATHS = frozenset({"/config.html", "/favicon.ico"})
 
 
 def db_connect():
@@ -627,12 +633,26 @@ class SOCHandler(SimpleHTTPRequestHandler):
     def _get_token(self) -> str:
         return self.headers.get("X-SOC-Token", "")
 
-    def _send_json(self, data: dict, status: int = 200):
+    def _cookie_token(self) -> str:
+        for part in self.headers.get("Cookie", "").split(";"):
+            part = part.strip()
+            if part.startswith("soc_session="):
+                return part[len("soc_session="):]
+        return ""
+
+    def _is_authenticated(self) -> bool:
+        return _check_auth(self._get_token()) or _check_auth(self._cookie_token())
+
+    def _send_json(self, data: dict, status: int = 200, extra_headers: dict | None = None):
         body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        if CORS_ORIGIN:
+            self.send_header("Access-Control-Allow-Origin", CORS_ORIGIN)
+        if extra_headers:
+            for k, v in extra_headers.items():
+                self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -643,23 +663,32 @@ class SOCHandler(SimpleHTTPRequestHandler):
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def _require_auth(self) -> bool:
-        if not _check_auth(self._get_token()):
+        if not self._is_authenticated():
             self._send_json({"ok": False, "error": "No autorizado"}, 401)
             return False
         return True
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-SOC-Token")
+        if CORS_ORIGIN:
+            self.send_header("Access-Control-Allow-Origin", CORS_ORIGIN)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-SOC-Token")
         self.end_headers()
 
     def do_GET(self):
         if self.path.startswith("/api/"):
             self._handle_api_get()
-        else:
-            super().do_GET()
+            return
+
+        path_clean = self.path.split("?")[0].split("#")[0]
+        if path_clean not in _PUBLIC_PATHS and not self._is_authenticated():
+            self.send_response(302)
+            self.send_header("Location", "/config.html")
+            self.end_headers()
+            return
+
+        super().do_GET()
 
     def do_POST(self):
         if self.path.startswith("/api/"):
@@ -720,11 +749,16 @@ class SOCHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/config/login":
             body     = self._read_body()
-            cfg_user = os.getenv("CONFIG_USER", "admin")
-            cfg_pass = os.getenv("CONFIG_PASSWORD", "admin")
+            cfg_user = os.getenv("CONFIG_USER", "")
+            cfg_pass = os.getenv("CONFIG_PASSWORD", "")
+            if not cfg_user or not cfg_pass:
+                self._send_json({"ok": False, "error": "Panel de config deshabilitado — define CONFIG_USER y CONFIG_PASSWORD en .env"}, 503)
+                return
             if body.get("username") == cfg_user and body.get("password") == cfg_pass:
                 token = _create_session()
-                self._send_json({"ok": True, "token": token})
+                self._send_json({"ok": True, "token": token}, extra_headers={
+                    "Set-Cookie": f"soc_session={token}; HttpOnly; SameSite=Strict; Path=/"
+                })
             else:
                 self._send_json({"ok": False, "error": "Credenciales incorrectas"}, 401)
             return
@@ -743,12 +777,16 @@ class SOCHandler(SimpleHTTPRequestHandler):
                     with conn.cursor() as cur:
                         cur.execute("""
                             INSERT INTO alert_rules
-                            (name, module, condition_field, condition_value, recipients, subject, cooldown_minutes)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            (name, module, condition_field, condition_value,
+                             condition_type, threshold_count,
+                             recipients, subject, cooldown_minutes)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                             RETURNING id
                         """, (
                             body["name"], body["module"],
                             body["condition_field"], body["condition_value"],
+                            body.get("condition_type", "match"),
+                            int(body.get("threshold_count") or 1),
                             body["recipients"], body["subject"],
                             body.get("cooldown_minutes", 60),
                         ))
@@ -824,9 +862,23 @@ class SOCHandler(SimpleHTTPRequestHandler):
 
 
 def start_http_server():
+    import ssl as _ssl
     os.chdir(BASE_DIR)
     server = ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), SOCHandler)
-    print(f"[server] Escuchando en http://{HTTP_HOST}:{HTTP_PORT}")
+
+    ssl_cert = os.getenv("SSL_CERT_FILE", "")
+    ssl_key  = os.getenv("SSL_KEY_FILE", "")
+    scheme   = "http"
+
+    if ssl_cert and ssl_key:
+        ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(ssl_cert, ssl_key)
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        scheme = "https"
+    else:
+        print("[server] ADVERTENCIA: HTTPS no configurado. Define SSL_CERT_FILE y SSL_KEY_FILE en .env para habilitar TLS.")
+
+    print(f"[server] Escuchando en {scheme}://{HTTP_HOST}:{HTTP_PORT}")
     server.serve_forever()
 
 
@@ -908,8 +960,11 @@ def main():
         t.start()
         print(f"[thread] {t.name} iniciado")
 
-    print(f"\n[OK] Portal disponible en: http://localhost:{HTTP_PORT}/index.html")
-    print(f"[OK] Config panel en:       http://localhost:{HTTP_PORT}/config.html")
+    _scheme = "https" if (os.getenv("SSL_CERT_FILE") and os.getenv("SSL_KEY_FILE")) else "http"
+    print(f"\n[OK] Portal disponible en: {_scheme}://localhost:{HTTP_PORT}/index.html")
+    print(f"[OK] Config panel en:       {_scheme}://localhost:{HTTP_PORT}/config.html")
+    if not os.getenv("CONFIG_USER") or not os.getenv("CONFIG_PASSWORD"):
+        print("[WARN] CONFIG_USER y CONFIG_PASSWORD no definidos — panel de config DESHABILITADO")
     print("[OK] Ctrl+C para salir\n")
 
     try:
