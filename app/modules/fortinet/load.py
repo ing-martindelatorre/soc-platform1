@@ -36,7 +36,7 @@ def _to_int(value: Any) -> Optional[int]:
 # CONFIG
 # =============================================================================
 def load_config(data: Dict[str, Any]) -> None:
-    device_name  = os.getenv("FORTI_DEVICE_NAME", "fortigate")
+    device_name  = data.get("device_name") or os.getenv("FORTI_DEVICE_NAME", "fortigate")
     meta         = data.get("meta", {})
     raw_sections = data.get("raw_sections", {})
     errors       = data.get("errors", [])
@@ -84,7 +84,7 @@ def load_config(data: Dict[str, Any]) -> None:
 # LOGS (legacy)
 # =============================================================================
 def load_logs(data: Dict[str, Any]) -> None:
-    device_name = os.getenv("FORTI_DEVICE_NAME", "fortigate")
+    device_name = data.get("device_name") or os.getenv("FORTI_DEVICE_NAME", "fortigate")
     meta        = data.get("meta", {})
     logs        = data.get("logs", [])
     errors      = data.get("errors", [])
@@ -203,7 +203,7 @@ def _insert_threats_batch(cur, device_name: str, source: str, records: List[Dict
 
 
 def load_threats(data: Dict[str, Any]) -> None:
-    device_name = os.getenv("FORTI_DEVICE_NAME", "fortigate")
+    device_name = data.get("device_name") or os.getenv("FORTI_DEVICE_NAME", "fortigate")
     errors      = data.get("errors", [])
 
     traffic_records   = data.get("traffic",   {}).get("records", [])

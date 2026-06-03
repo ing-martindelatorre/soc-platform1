@@ -17,7 +17,7 @@ services:
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
-    container_name: soc_postgres
+    container_name: soc1_postgres
     restart: unless-stopped
     env_file:
       - .env
@@ -26,9 +26,9 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "${DB_PORT_HOST:-5433}:5432"   # Puerto externo configurable, interno siempre 5432
+      - "${DB_PORT_HOST:-5434}:5432"   # Puerto externo configurable, interno siempre 5432
     volumes:
-      - soc_postgres_data:/var/lib/postgresql/data     # Datos persistentes
+      - soc1_postgres_data:/var/lib/postgresql/data     # Datos persistentes
       - ./sql:/docker-entrypoint-initdb.d:ro           # Migrations auto-ejecutadas al crear la DB
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
@@ -45,7 +45,7 @@ services:
   # ---------------------------------------------------------------------------
   pgadmin:
     image: dpage/pgadmin4:8
-    container_name: soc_pgadmin
+    container_name: soc1_pgadmin
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@soc.local}
@@ -53,9 +53,9 @@ services:
       PGADMIN_CONFIG_SERVER_MODE: "False"
       PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
     ports:
-      - "8080:80"
+      - "8081:80"
     volumes:
-      - soc_pgadmin_data:/var/lib/pgadmin
+      - soc1_pgadmin_data:/var/lib/pgadmin
     depends_on:
       postgres:
         condition: service_healthy
@@ -103,9 +103,9 @@ services:
 # Volúmenes persistentes
 # =============================================================================
 volumes:
-  soc_postgres_data:
+  soc1_postgres_data:
     driver: local
-  soc_pgadmin_data:
+  soc1_pgadmin_data:
     driver: local
 
 # =============================================================================
@@ -114,4 +114,4 @@ volumes:
 networks:
   soc_net:
     driver: bridge
-    name: soc_network
+    name: soc1_network

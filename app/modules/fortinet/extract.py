@@ -2,7 +2,7 @@
 app/modules/fortinet/extract.py
 
 Extractor de datos desde la API REST de FortiGate.
-Soporta tres modos:
+Soporta múltiples dispositivos (FORTI_1_* … FORTI_5_*) y tres modos:
   - config:   snapshots de configuración (políticas, interfaces, objetos, rutas, admins)
   - logs:     logs de tráfico / sistema desde disco del equipo
   - threats:  logs de amenazas en memoria (tráfico, webfilter, sistema, VPN)
@@ -26,7 +26,6 @@ FORTINET_CONFIG_ENDPOINTS = {
     "system_admins":      "/api/v2/cmdb/system/admin",
 }
 
-# Endpoints de amenazas confirmados como funcionales
 FORTINET_THREAT_ENDPOINTS = {
     "traffic_forward": "/api/v2/log/memory/traffic/forward",
     "event_system":    "/api/v2/log/memory/event/system",
@@ -36,77 +35,107 @@ FORTINET_THREAT_ENDPOINTS = {
     "virus":           "/api/v2/log/memory/virus",
 }
 
-
-def _bool_env(name: str, default: bool = True) -> bool:
-    value = os.getenv(name, str(default)).strip().lower()
-    return value in {"1", "true", "yes", "on"}
+# Número máximo de dispositivos soportados
+_MAX_DEVICES = 5
 
 
-def _get_token() -> str:
-    token = os.getenv("FORTI_TOKEN") or os.getenv("FORTI_API_TOKEN")
-    if not token:
-        raise EnvironmentError(
-            "No se encontró token de Fortinet. "
-            "Define FORTI_TOKEN (o FORTI_API_TOKEN) en tu .env"
-        )
-    return token
+def _get_device_cfg(device_id: int) -> Dict[str, Any]:
+    """
+    Carga la configuración de un FortiGate desde variables de entorno numeradas.
+    Para device_id=1 hace fallback a las vars legadas sin número (FORTI_BASE_URL, etc.)
+    """
+    prefix = f"FORTI_{device_id}"
+    legacy = device_id == 1
+
+    def _env(*keys: str) -> Optional[str]:
+        for k in keys:
+            v = os.getenv(k)
+            if v:
+                return v
+        return None
+
+    host = _env(
+        f"{prefix}_BASE_URL",
+        f"{prefix}_HOST",
+        *( ("FORTI_BASE_URL", "FORTI_HOST") if legacy else () ),
+    )
+    token = _env(
+        f"{prefix}_API_TOKEN",
+        f"{prefix}_TOKEN",
+        *( ("FORTI_API_TOKEN", "FORTI_TOKEN") if legacy else () ),
+    )
+    device_name = _env(
+        f"{prefix}_DEVICE_NAME",
+        *( ("FORTI_DEVICE_NAME",) if legacy else () ),
+    ) or f"fortigate-{device_id}"
+
+    vdom = _env(f"{prefix}_VDOM", "FORTI_VDOM") or "root"
+
+    verify_ssl_raw = _env(f"{prefix}_VERIFY_SSL", "FORTI_VERIFY_SSL") or "true"
+    verify_ssl = verify_ssl_raw.strip().lower() in {"1", "true", "yes", "on"}
+
+    timeout = int(_env(f"{prefix}_TIMEOUT", "FORTI_TIMEOUT") or "30")
+
+    return {
+        "device_id":   device_id,
+        "host":        host.rstrip("/") if host else None,
+        "token":       token,
+        "device_name": device_name,
+        "vdom":        vdom,
+        "verify_ssl":  verify_ssl,
+        "timeout":     timeout,
+    }
 
 
-def _build_session() -> requests.Session:
-    verify_ssl = _bool_env("FORTI_VERIFY_SSL", True)
-    if not verify_ssl:
+def get_active_device_ids() -> List[int]:
+    """Retorna los IDs de dispositivos con host y token configurados en el .env."""
+    active = []
+    for i in range(1, _MAX_DEVICES + 1):
+        cfg = _get_device_cfg(i)
+        if cfg["host"] and cfg["token"]:
+            active.append(i)
+    return active if active else [1]
+
+
+def _build_session_for(cfg: Dict[str, Any]) -> requests.Session:
+    if not cfg["verify_ssl"]:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
     session = requests.Session()
     session.headers.update({
-        "Authorization": f"Bearer {_get_token()}",
+        "Authorization": f"Bearer {cfg['token']}",
         "Content-Type": "application/json",
     })
     return session
 
 
-def _get_host() -> str:
-    host = os.getenv("FORTI_HOST") or os.getenv("FORTI_BASE_URL")
-    if not host:
-        raise EnvironmentError(
-            "No se encontró host de Fortinet. "
-            "Define FORTI_HOST en tu .env"
-        )
-    return host.rstrip("/")
-
-
 def fetch(
     path: str,
+    cfg: Dict[str, Any],
     extra_params: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    host       = _get_host()
-    vdom       = os.getenv("FORTI_VDOM", "root")
-    verify_ssl = _bool_env("FORTI_VERIFY_SSL", True)
-    timeout    = int(os.getenv("FORTI_TIMEOUT", "30"))
-
-    params: Dict[str, Any] = {"vdom": vdom}
+    params: Dict[str, Any] = {"vdom": cfg["vdom"]}
     if extra_params:
         params.update(extra_params)
 
-    url     = f"{host}{path}"
-    session = _build_session()
+    url     = f"{cfg['host']}{path}"
+    session = _build_session_for(cfg)
 
     response = session.get(
         url,
         params=params,
-        verify=verify_ssl,
-        timeout=timeout,
+        verify=cfg["verify_ssl"],
+        timeout=cfg["timeout"],
     )
     response.raise_for_status()
     return response.json()
 
 
-def _extract_meta_from_response(result: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_meta_from_response(result: Dict[str, Any], vdom: str = "root") -> Dict[str, Any]:
     return {
         "serial":      result.get("serial"),
         "version":     result.get("version"),
         "build":       str(result.get("build")) if result.get("build") is not None else None,
-        "vdom":        result.get("vdom", os.getenv("FORTI_VDOM", "root")),
+        "vdom":        result.get("vdom", vdom),
         "status":      result.get("status"),
         "http_status": result.get("http_status"),
     }
@@ -115,21 +144,29 @@ def _extract_meta_from_response(result: Dict[str, Any]) -> Dict[str, Any]:
 # =============================================================================
 # CONFIG
 # =============================================================================
-def extract_config(**kwargs) -> Dict[str, Any]:
+def extract_config(device_id: int = 1, **kwargs) -> Dict[str, Any]:
+    cfg = _get_device_cfg(device_id)
+    if not cfg["host"] or not cfg["token"]:
+        raise EnvironmentError(
+            f"Dispositivo {device_id}: FORTI_{device_id}_BASE_URL o "
+            f"FORTI_{device_id}_API_TOKEN no configurados en .env"
+        )
+
     data: Dict[str, Any] = {
-        "mode":     "config",
-        "meta":     {},
-        "sections": {},
-        "errors":   [],
+        "mode":        "config",
+        "device_name": cfg["device_name"],
+        "meta":        {},
+        "sections":    {},
+        "errors":      [],
     }
 
     for section_name, path in FORTINET_CONFIG_ENDPOINTS.items():
         try:
-            result = fetch(path)
+            result = fetch(path, cfg)
             data["sections"][section_name] = result
 
             if not data["meta"]:
-                data["meta"] = _extract_meta_from_response(result)
+                data["meta"] = _extract_meta_from_response(result, cfg["vdom"])
 
         except Exception as exc:
             error_text = str(exc)
@@ -161,14 +198,22 @@ def _slice_results(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
     return copied
 
 
-def extract_logs(**kwargs) -> Dict[str, Any]:
+def extract_logs(device_id: int = 1, **kwargs) -> Dict[str, Any]:
+    cfg = _get_device_cfg(device_id)
+    if not cfg["host"] or not cfg["token"]:
+        raise EnvironmentError(
+            f"Dispositivo {device_id}: FORTI_{device_id}_BASE_URL o "
+            f"FORTI_{device_id}_API_TOKEN no configurados en .env"
+        )
+
     endpoint  = kwargs.get("endpoint") or "/api/v2/log/disk/traffic/forward/system"
     limit     = int(kwargs.get("limit") or 100)
     date_from = kwargs.get("date_from")
     date_to   = kwargs.get("date_to")
 
     data: Dict[str, Any] = {
-        "mode": "logs",
+        "mode":        "logs",
+        "device_name": cfg["device_name"],
         "meta": {
             "requested_endpoint": endpoint,
             "requested_limit":    limit,
@@ -180,10 +225,10 @@ def extract_logs(**kwargs) -> Dict[str, Any]:
     }
 
     try:
-        result = fetch(endpoint)
+        result = fetch(endpoint, cfg)
         result = _slice_results(result, limit)
 
-        response_meta = _extract_meta_from_response(result)
+        response_meta = _extract_meta_from_response(result, cfg["vdom"])
         data["meta"].update(response_meta)
         data["sections"]["logs"] = result
 
@@ -200,7 +245,7 @@ def extract_logs(**kwargs) -> Dict[str, Any]:
 # =============================================================================
 # THREATS — logs de amenazas en memoria
 # =============================================================================
-def extract_threats(**kwargs) -> Dict[str, Any]:
+def extract_threats(device_id: int = 1, **kwargs) -> Dict[str, Any]:
     """
     Extrae logs de amenazas desde la memoria del FortiGate.
     Consulta múltiples endpoints en paralelo y consolida los resultados.
@@ -210,15 +255,23 @@ def extract_threats(**kwargs) -> Dict[str, Any]:
         endpoints: list — lista de nombres de endpoints a consultar
                           (default: todos los de FORTINET_THREAT_ENDPOINTS)
     """
+    cfg = _get_device_cfg(device_id)
+    if not cfg["host"] or not cfg["token"]:
+        raise EnvironmentError(
+            f"Dispositivo {device_id}: FORTI_{device_id}_BASE_URL o "
+            f"FORTI_{device_id}_API_TOKEN no configurados en .env"
+        )
+
     rows      = int(kwargs.get("rows", 200))
     endpoints = kwargs.get("endpoints") or list(FORTINET_THREAT_ENDPOINTS.keys())
 
     data: Dict[str, Any] = {
-        "mode":     "threats",
-        "meta":     {},
-        "sections": {},
-        "errors":   [],
-        "summary":  {},
+        "mode":        "threats",
+        "device_name": cfg["device_name"],
+        "meta":        {},
+        "sections":    {},
+        "errors":      [],
+        "summary":     {},
     }
 
     total_records = 0
@@ -229,33 +282,31 @@ def extract_threats(**kwargs) -> Dict[str, Any]:
             continue
 
         try:
-            result = fetch(path, extra_params={"rows": rows})
+            result = fetch(path, cfg, extra_params={"rows": rows})
 
-            # Extraer meta del primer resultado exitoso
             if not data["meta"]:
-                data["meta"] = _extract_meta_from_response(result)
+                data["meta"] = _extract_meta_from_response(result, cfg["vdom"])
 
             records = result.get("results", [])
             if not isinstance(records, list):
                 records = []
 
             data["sections"][name] = {
-                "endpoint":     path,
-                "total_lines":  result.get("total_lines", len(records)),
-                "completed":    result.get("completed", 100),
-                "results":      records,
+                "endpoint":    path,
+                "total_lines": result.get("total_lines", len(records)),
+                "completed":   result.get("completed", 100),
+                "results":     records,
             }
             total_records += len(records)
 
         except Exception as exc:
             error_text = str(exc)
-            # 404 significa que el endpoint no existe en este FortiGate — no es error crítico
             if "404" in error_text:
                 data["sections"][name] = {
-                    "endpoint": path,
-                    "total_lines": 0,
-                    "completed": 100,
-                    "results": [],
+                    "endpoint":      path,
+                    "total_lines":   0,
+                    "completed":     100,
+                    "results":       [],
                     "not_available": True,
                 }
             else:
@@ -277,10 +328,10 @@ def extract_threats(**kwargs) -> Dict[str, Any]:
 # =============================================================================
 # Entry point
 # =============================================================================
-def extract(**kwargs) -> Dict[str, Any]:
+def extract(device_id: int = 1, **kwargs) -> Dict[str, Any]:
     mode = kwargs.get("mode", "config")
     if mode == "logs":
-        return extract_logs(**kwargs)
+        return extract_logs(device_id=device_id, **kwargs)
     if mode == "threats":
-        return extract_threats(**kwargs)
-    return extract_config(**kwargs)
+        return extract_threats(device_id=device_id, **kwargs)
+    return extract_config(device_id=device_id, **kwargs)
