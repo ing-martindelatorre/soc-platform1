@@ -303,6 +303,7 @@ QUERIES = {
                 COALESCE(MAX(dstcountry), '—')        AS extra
             FROM fortinet_threats
             WHERE classification = %s
+              {device_filter}
               AND collected_at >= NOW() - INTERVAL '1 hour'
             GROUP BY srcname, srcip, app, classification
             ORDER BY event_count DESC
@@ -319,6 +320,7 @@ QUERIES = {
                 COALESCE(MAX(dstcountry), '—')        AS extra
             FROM fortinet_threats
             WHERE source = %s
+              {device_filter}
               AND collected_at >= NOW() - INTERVAL '1 hour'
             GROUP BY srcname, srcip, app, classification
             ORDER BY event_count DESC
@@ -570,7 +572,18 @@ def evaluate_and_send() -> int:
                 logger.warning(f"[alerts] Sin query para {module}.{field}")
                 continue
 
-            cur.execute(query, (value,))
+            device_filter = rule.get("device_filter") or ""
+            if module == "fortinet":
+                if device_filter:
+                    query = query.replace("{device_filter}", "AND device_name = %s")
+                    params = (value, device_filter)
+                else:
+                    query = query.replace("{device_filter}", "")
+                    params = (value,)
+            else:
+                params = (value,)
+
+            cur.execute(query, params)
             all_rows = [dict(r) for r in cur.fetchall()]
 
             if not all_rows:

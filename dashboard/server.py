@@ -61,6 +61,22 @@ MODULE_STATUS: dict[str, dict] = {
     "fortinet": {"last_update": None, "status": "pending", "records": 0, "health": {}},
     "snyk":     {"last_update": None, "status": "pending", "records": 0, "health": {}},
 }
+
+
+def get_active_fortinet_devices() -> list[str]:
+    devices = []
+    for n in range(1, 6):
+        url   = os.getenv(f"FORTI_{n}_BASE_URL", "").strip()
+        token = os.getenv(f"FORTI_{n}_API_TOKEN", "").strip()
+        name  = os.getenv(f"FORTI_{n}_DEVICE_NAME", f"fortigate-{n}").strip()
+        if url and token:
+            devices.append(name)
+    if not devices:
+        url  = os.getenv("FORTI_BASE_URL", "").strip()
+        name = os.getenv("FORTI_DEVICE_NAME", "fortigate").strip()
+        if url:
+            devices.append(name)
+    return devices
 _status_lock = threading.Lock()
 
 # Sesiones del panel de configuración
@@ -329,29 +345,64 @@ def refresh_fortinet():
     while True:
         try:
             sys.path.insert(0, str(BASE_DIR.parent))
-            from dashboard.run_fortinet_dashboard import (
-                get_conn, fetch_latest_sections, build_html
-            )
-            device_name = os.getenv("FORTI_DEVICE_NAME")
-            conn = get_conn()
-            try:
-                chosen_device, sections, errors = fetch_latest_sections(conn, device_name)
-            finally:
-                conn.close()
-            html = build_html(chosen_device, sections, errors)
-            (BASE_DIR / "fortinet_dashboard_output.html").write_text(html, encoding="utf-8")
+            from dashboard.run_fortinet_dashboard import get_conn, fetch_latest_sections, build_html
 
-            policies   = len(sections.get("firewall_policies", {}).get("results", []))
-            interfaces = len(sections.get("interfaces", {}).get("results", []))
+            devices = get_active_fortinet_devices()
+            total_policies = 0
+            primary_written = False
+            any_ok = False
+
+            for device_name in devices:
+                safe_name = device_name.lower().replace(" ", "_").replace("-", "_")
+                dash_file = f"fortinet_dashboard_{safe_name}.html"
+                try:
+                    conn = get_conn()
+                    try:
+                        chosen, sections, errors = fetch_latest_sections(conn, device_name)
+                    finally:
+                        conn.close()
+
+                    html = build_html(chosen, sections, errors)
+                    (BASE_DIR / dash_file).write_text(html, encoding="utf-8")
+
+                    if not primary_written:
+                        (BASE_DIR / "fortinet_dashboard_output.html").write_text(html, encoding="utf-8")
+                        primary_written = True
+
+                    policies   = len(sections.get("firewall_policies", {}).get("results", []))
+                    interfaces = len(sections.get("interfaces", {}).get("results", []))
+                    total_policies += policies
+                    any_ok = True
+
+                    with _status_lock:
+                        MODULE_STATUS[f"fortinet_{safe_name}"] = {
+                            "last_update":    now_str(),
+                            "status":         "ok",
+                            "records":        policies,
+                            "health":         {"policies": policies, "interfaces": interfaces},
+                            "device_name":    device_name,
+                            "dashboard_file": dash_file,
+                        }
+                except Exception as dev_e:
+                    print(f"[fortinet] ERROR dispositivo {device_name}: {dev_e}")
+                    with _status_lock:
+                        MODULE_STATUS[f"fortinet_{safe_name}"] = {
+                            "last_update":    now_str(),
+                            "status":         "error",
+                            "records":        0,
+                            "health":         {},
+                            "device_name":    device_name,
+                            "dashboard_file": dash_file,
+                        }
 
             with db_connect() as dbconn:
                 with dbconn.cursor() as cur:
                     cur.execute("SELECT COUNT(*) AS n FROM fortinet_raw_snapshots")
-                    snaps = cur.fetchone()["n"]
+                    total_snaps = int(cur.fetchone()["n"])
 
-            health = {"snapshots": int(snaps), "policies": policies, "interfaces": interfaces}
-            update_status("fortinet", "ok", int(snaps), health)
-            print(f"[fortinet] OK — snaps={snaps}, policies={policies} | {now_str()}")
+            health = {"snapshots": total_snaps, "policies": total_policies, "devices": len(devices)}
+            update_status("fortinet", "ok" if any_ok else "error", total_snaps, health)
+            print(f"[fortinet] OK — {len(devices)} dispositivo(s), snaps={total_snaps} | {now_str()}")
         except Exception as e:
             update_status("fortinet", "error")
             print(f"[fortinet] ERROR: {e}")
@@ -361,7 +412,10 @@ def refresh_fortinet():
 # =============================================================================
 # FORTINET THREATS
 # =============================================================================
-def build_fortinet_threats_data(hours: int = 24) -> dict:
+def build_fortinet_threats_data(hours: int = 24, device_name: str | None = None) -> dict:
+    df_sql   = "AND device_name = %s" if device_name else ""
+    df_param = (device_name,) if device_name else ()
+
     with db_connect() as conn:
         with conn.cursor() as cur:
             interval = f"{hours} hours"
@@ -370,8 +424,9 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
                 SELECT source, classification, COUNT(*) AS n
                 FROM fortinet_threats
                 WHERE collected_at >= NOW() - INTERVAL '{interval}'
+                {df_sql}
                 GROUP BY source, classification
-            """)
+            """, df_param)
             rows = cur.fetchall()
 
             counts: dict = {}
@@ -391,8 +446,9 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
                 FROM fortinet_threats
                 WHERE source='traffic'
                   AND collected_at >= NOW() - INTERVAL '{interval}'
+                  {df_sql}
                 ORDER BY collected_at DESC LIMIT 200
-            """)
+            """, df_param)
             traffic_records = [dict(r) for r in cur.fetchall()]
 
             cur.execute(f"""
@@ -401,8 +457,9 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
                 FROM fortinet_threats
                 WHERE source='event'
                   AND collected_at >= NOW() - INTERVAL '{interval}'
+                  {df_sql}
                 ORDER BY collected_at DESC LIMIT 200
-            """)
+            """, df_param)
             event_records = [dict(r) for r in cur.fetchall()]
 
             cur.execute(f"""
@@ -411,8 +468,9 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
                 FROM fortinet_threats
                 WHERE source='webfilter'
                   AND collected_at >= NOW() - INTERVAL '{interval}'
+                  {df_sql}
                 ORDER BY collected_at DESC LIMIT 200
-            """)
+            """, df_param)
             webfilter_records = [dict(r) for r in cur.fetchall()]
 
             cur.execute(f"""
@@ -421,8 +479,9 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
                 FROM fortinet_threats
                 WHERE source='ips'
                   AND collected_at >= NOW() - INTERVAL '{interval}'
+                  {df_sql}
                 ORDER BY collected_at DESC LIMIT 100
-            """)
+            """, df_param)
             ips_records = [dict(r) for r in cur.fetchall()]
 
             cur.execute(f"""
@@ -431,8 +490,9 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
                 FROM fortinet_threats
                 WHERE source='vpn'
                   AND collected_at >= NOW() - INTERVAL '{interval}'
+                  {df_sql}
                 ORDER BY collected_at DESC LIMIT 100
-            """)
+            """, df_param)
             vpn_records = [dict(r) for r in cur.fetchall()]
 
             cur.execute(f"""
@@ -444,9 +504,10 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
                 FROM fortinet_threats
                 WHERE source = 'traffic'
                   AND collected_at >= NOW() - INTERVAL '{interval}'
+                  {df_sql}
                 GROUP BY 1
                 ORDER BY 1
-            """)
+            """, df_param)
             traffic_over_time = [
                 {
                     "hora":       str(r["hora"]),
@@ -531,19 +592,53 @@ def build_fortinet_threats_data(hours: int = 24) -> dict:
 def refresh_fortinet_threats():
     while True:
         try:
+            # Global (todos los dispositivos)
             data_24h = build_fortinet_threats_data(hours=24)
             (BASE_DIR / "fortinet_threats_data.json").write_text(
-                json.dumps(data_24h, indent=2, ensure_ascii=False, default=str),
-                encoding="utf-8"
+                json.dumps(data_24h, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
             )
             data_7d = build_fortinet_threats_data(hours=168)
             (BASE_DIR / "fortinet_threats_data_7d.json").write_text(
-                json.dumps(data_7d, indent=2, ensure_ascii=False, default=str),
-                encoding="utf-8"
+                json.dumps(data_7d, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
             )
             total = data_24h["summary"]["total_traffic"]
             susp  = data_24h["summary"]["suspicious_traffic"]
             print(f"[fortinet-threats] OK — 24h: traffic={total}, suspicious={susp} | {now_str()}")
+
+            # Por dispositivo
+            for device_name in get_active_fortinet_devices():
+                safe = device_name.lower().replace(" ", "_").replace("-", "_")
+                try:
+                    d24 = build_fortinet_threats_data(hours=24,  device_name=device_name)
+                    d7d = build_fortinet_threats_data(hours=168, device_name=device_name)
+                    (BASE_DIR / f"fortinet_threats_data_{safe}.json").write_text(
+                        json.dumps(d24, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
+                    )
+                    (BASE_DIR / f"fortinet_threats_data_{safe}_7d.json").write_text(
+                        json.dumps(d7d, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
+                    )
+                    dev_total = d24["summary"]["total_traffic"]
+                    dev_susp  = d24["summary"]["suspicious_traffic"]
+                    with _status_lock:
+                        MODULE_STATUS[f"fortinet_threats_{safe}"] = {
+                            "last_update":   now_str(),
+                            "status":        "ok",
+                            "records":       dev_total,
+                            "health":        {"suspicious": dev_susp, "total": dev_total},
+                            "device_name":   device_name,
+                            "dashboard_url": f"fortinet_threats_dashboard.html?device={safe}",
+                        }
+                except Exception as dev_e:
+                    print(f"[fortinet-threats] ERROR dispositivo {device_name}: {dev_e}")
+                    with _status_lock:
+                        MODULE_STATUS[f"fortinet_threats_{safe}"] = {
+                            "last_update":   now_str(),
+                            "status":        "error",
+                            "records":       0,
+                            "health":        {},
+                            "device_name":   device_name,
+                            "dashboard_url": f"fortinet_threats_dashboard.html?device={safe}",
+                        }
         except Exception as e:
             print(f"[fortinet-threats] ERROR: {e}")
         time.sleep(DASHBOARD_REFRESH["fortinet_threats"])

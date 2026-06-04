@@ -186,11 +186,12 @@
       <p id="ts">SOC Platform — cargando...</p>
     </div>
     <div class="header-right">
+      <div id="device-selector" style="display:flex;gap:6px;align-items:center"></div>
       <div class="period-selector">
         <button class="period-btn active" id="btn-24h" onclick="setPeriod('24h')">24 horas</button>
         <button class="period-btn" id="btn-7d"  onclick="setPeriod('7d')">7 días</button>
       </div>
-      <div class="badge">Leviathan SOC</div>
+      <div class="badge" id="device-badge">Leviathan SOC</div>
     </div>
   </div>
 
@@ -294,10 +295,35 @@ let currentPeriod = '24h';
 let timelineChart, countryChart, appChart, webfilterChart, trafficPieChart;
 const REFRESH_MS = 120000;
 
-const JSON_FILES = {
+// Dispositivo desde URL param (?device=megafactory)
+const _urlParams   = new URLSearchParams(window.location.search);
+const DEVICE_PARAM = _urlParams.get('device') || '';
+const DEVICE_LABEL = DEVICE_PARAM ? DEVICE_PARAM.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Todos';
+
+const JSON_FILES = DEVICE_PARAM ? {
+  '24h': `fortinet_threats_data_${DEVICE_PARAM}.json`,
+  '7d':  `fortinet_threats_data_${DEVICE_PARAM}_7d.json`,
+} : {
   '24h': 'fortinet_threats_data.json',
   '7d':  'fortinet_threats_data_7d.json',
 };
+
+// Badge de dispositivo + selector
+document.getElementById('device-badge').textContent = DEVICE_PARAM ? DEVICE_LABEL : 'Leviathan SOC';
+document.title = DEVICE_PARAM ? `${DEVICE_LABEL} — Fortinet Threats` : 'Fortinet Threats — SOC Platform';
+
+// Poblar selector de dispositivos desde soc_status.json
+fetch('soc_status.json?t=' + Date.now()).then(r => r.json()).then(st => {
+  const threats = Object.entries(st).filter(([k]) => k.startsWith('fortinet_threats_'));
+  const sel = document.getElementById('device-selector');
+  const all = `<a href="fortinet_threats_dashboard.html" style="font-family:'JetBrains Mono',monospace;font-size:10px;padding:6px 12px;border:1px solid ${!DEVICE_PARAM ? 'var(--accent)' : 'var(--border)'};border-radius:4px;color:${!DEVICE_PARAM ? 'var(--accent)' : 'var(--muted)'};text-decoration:none;text-transform:uppercase;letter-spacing:.06em">Todos</a>`;
+  const devLinks = threats.map(([, v]) => {
+    const safe  = v.device_name.toLowerCase().replace(/ /g,'_').replace(/-/g,'_');
+    const active = DEVICE_PARAM === safe;
+    return `<a href="fortinet_threats_dashboard.html?device=${safe}" style="font-family:'JetBrains Mono',monospace;font-size:10px;padding:6px 12px;border:1px solid ${active ? 'var(--accent)' : 'var(--border)'};border-radius:4px;color:${active ? 'var(--accent)' : 'var(--muted)'};text-decoration:none;text-transform:uppercase;letter-spacing:.06em">${esc(v.device_name)}</a>`;
+  }).join('');
+  sel.innerHTML = all + devLinks;
+}).catch(() => {});
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 function esc(s) {

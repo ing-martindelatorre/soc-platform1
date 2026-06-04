@@ -250,8 +250,8 @@
       <div class="card-update" id="upd-nmap">—</div>
     </a>
 
-    <!-- FORTINET CONFIG -->
-    <a href="fortinet_dashboard_output.html" class="module-card hc-grey" id="card-fortinet">
+    <!-- FORTINET CONFIG (multi-dispositivo) -->
+    <div class="module-card hc-grey" id="card-fortinet" style="cursor:default">
       <div class="card-header">
         <div class="card-icon">🔥</div>
         <div class="card-right">
@@ -269,13 +269,13 @@
       </div>
       <div class="card-meta">
         <div class="card-stat"><div class="val" id="val-fortinet">—</div><div class="lbl">snapshots</div></div>
-        <div class="card-link">Ver →</div>
       </div>
+      <div id="forti-device-links" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div>
       <div class="card-update" id="upd-fortinet">—</div>
-    </a>
+    </div>
 
-    <!-- FORTINET THREATS -->
-    <a href="fortinet_threats_dashboard.html" class="module-card hc-grey" id="card-fortinet-threats">
+    <!-- FORTINET THREATS (multi-dispositivo) -->
+    <div class="module-card hc-grey" id="card-fortinet-threats" style="cursor:default">
       <div class="card-header">
         <div class="card-icon">⚠️</div>
         <div class="card-right">
@@ -294,10 +294,12 @@
       </div>
       <div class="card-meta">
         <div class="card-stat"><div class="val" id="val-fortinet-threats">—</div><div class="lbl">tráfico total</div></div>
-        <div class="card-link">Ver →</div>
+      </div>
+      <div id="forti-threats-links" style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+        <a href="fortinet_threats_dashboard.html" style="color:var(--accent);font-size:12px;text-decoration:none;padding:4px 10px;border:1px solid rgba(0,212,255,0.3);border-radius:6px;display:flex;justify-content:space-between">⚠️ Todos los dispositivos<span>Ver →</span></a>
       </div>
       <div class="card-update" id="upd-fortinet-threats">—</div>
-    </a>
+    </div>
 
     <!-- SNYK -->
     <a href="snyk_dashboard.html" class="module-card hc-grey" id="card-snyk">
@@ -451,10 +453,21 @@ async function loadStatus() {
     const f = d.fortinet || {};
     const fh = f.health || {};
     healths.push(updateCard('fortinet', f.status==='ok', fh.snapshots, f.records, f.last_update, [
-      ['snapshots',  fh.snapshots,  hvClass(getHealth('fortinet', fh.snapshots))],
-      ['políticas',  fh.policies,   'hv-m'],
-      ['interfaces', fh.interfaces, 'hv-m'],
+      ['dispositivos', fh.devices,   'hv-m'],
+      ['snapshots',    fh.snapshots, hvClass(getHealth('fortinet', fh.snapshots))],
+      ['políticas',    fh.policies,  'hv-m'],
     ]));
+
+    // FORTINET — links por dispositivo
+    const fortiDevices = Object.entries(d).filter(([k, v]) => k.startsWith('fortinet_') && v.dashboard_file);
+    const linksEl = document.getElementById('forti-device-links');
+    if (linksEl) {
+      linksEl.innerHTML = fortiDevices.map(([, v]) => {
+        const color = v.status === 'ok' ? 'var(--accent)' : 'var(--red)';
+        const icon  = v.status === 'ok' ? '🖥' : '⚠';
+        return `<a href="${v.dashboard_file}" style="color:${color};font-size:12px;text-decoration:none;padding:4px 10px;border:1px solid ${color === 'var(--accent)' ? 'rgba(0,212,255,0.3)' : 'rgba(255,77,109,0.3)'};border-radius:6px;display:flex;justify-content:space-between">${icon} ${v.device_name}<span>Ver →</span></a>`;
+      }).join('');
+    }
 
     // FORTINET THREATS — lee directamente del JSON de threats
     try {
@@ -473,6 +486,20 @@ async function loadStatus() {
         ]);
       }
     } catch(e) { healths.push('grey'); }
+
+    // FORTINET THREATS — links por dispositivo
+    const fortiThreats = Object.entries(d).filter(([k, v]) => k.startsWith('fortinet_threats_') && v.dashboard_url);
+    const threatsLinksEl = document.getElementById('forti-threats-links');
+    if (threatsLinksEl && fortiThreats.length > 0) {
+      const globalLink = `<a href="fortinet_threats_dashboard.html" style="color:var(--accent);font-size:12px;text-decoration:none;padding:4px 10px;border:1px solid rgba(0,212,255,0.3);border-radius:6px;display:flex;justify-content:space-between">⚠️ Todos los dispositivos<span>Ver →</span></a>`;
+      const devLinks = fortiThreats.map(([, v]) => {
+        const color = v.status === 'ok' ? 'var(--accent)' : 'var(--red)';
+        const border = v.status === 'ok' ? 'rgba(0,212,255,0.3)' : 'rgba(255,77,109,0.3)';
+        const icon = v.status === 'ok' ? '⚠️' : '⚠';
+        return `<a href="${v.dashboard_url}" style="color:${color};font-size:12px;text-decoration:none;padding:4px 10px;border:1px solid ${border};border-radius:6px;display:flex;justify-content:space-between">${icon} ${v.device_name}<span>Ver →</span></a>`;
+      }).join('');
+      threatsLinksEl.innerHTML = globalLink + devLinks;
+    }
 
     // SNYK
     const sk = d.snyk || {};

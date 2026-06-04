@@ -37,7 +37,8 @@ def transform_config(data: Dict[str, Any]) -> Dict[str, Any]:
     router_static      = _results(sections.get("router_static", {}))
 
     return {
-        "mode": "config",
+        "mode":        "config",
+        "device_name": data.get("device_name", "fortigate"),
         "meta": data.get("meta", {}),
         "summary": {
             "addresses_count":  len(firewall_addresses),
@@ -66,7 +67,8 @@ def transform_logs(data: Dict[str, Any]) -> Dict[str, Any]:
     log_entries  = _results(logs_section)
 
     return {
-        "mode": "logs",
+        "mode":        "logs",
+        "device_name": data.get("device_name", "fortigate"),
         "meta": data.get("meta", {}),
         "summary": {
             "logs_count":   len(log_entries),
@@ -293,7 +295,8 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     return {
-        "mode": "threats",
+        "mode":        "threats",
+        "device_name": data.get("device_name", "fortigate"),
         "meta": data.get("meta", {}),
         "summary": {
             "total_traffic":        len(traffic_records),
