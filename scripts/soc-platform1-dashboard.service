@@ -1,0 +1,18 @@
+[Unit]
+Description=SOC Platform 1 — Dashboard (puerto 8889)
+After=network.target soc-platform1.service
+Wants=soc-platform1.service
+
+[Service]
+Type=simple
+User=zidane
+WorkingDirectory=/home/zidane/soc-platform1
+ExecStart=/home/zidane/soc-platform1/venv/bin/python dashboard/server.py
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=soc-platform1-dashboard
+
+[Install]
+WantedBy=multi-user.target

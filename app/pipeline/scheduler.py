@@ -173,6 +173,39 @@ def main() -> None:
         max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 
+    # ── CPANEL stats — cada 15 minutos ───────────────────────────────────────
+    scheduler.add_job(
+        execute_job, trigger="interval", minutes=15,
+        args=["cpanel"], kwargs={"mode": "stats"},
+        id="cpanel_stats_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+
+    # ── CPANEL security (cPHulk) — cada 15 minutos (offset +5 min) ──────────
+    scheduler.add_job(
+        execute_job, trigger="interval", minutes=15,
+        args=["cpanel"], kwargs={"mode": "security"},
+        id="cpanel_security_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+        start_date=now.replace(minute=(now.minute + 5) % 60),
+    )
+
+    # ── CPANEL accounts — cada hora ──────────────────────────────────────────
+    scheduler.add_job(
+        execute_job, trigger="interval", hours=1,
+        args=["cpanel"], kwargs={"mode": "accounts"},
+        id="cpanel_accounts_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=300,
+    )
+
+    # ── CPANEL logs Exim (SSH) — cada 30 minutos ─────────────────────────────
+    scheduler.add_job(
+        execute_job, trigger="interval", minutes=30,
+        args=["cpanel"], kwargs={"mode": "logs"},
+        id="cpanel_logs_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=300,
+    )
+
     # ── MOTOR DE ALERTAS — cada 5 minutos ────────────────────────────────────
     scheduler.add_job(
         execute_alert_job, trigger="interval", minutes=5,
@@ -199,6 +232,10 @@ def main() -> None:
     print("  Nmap quick          cada 6 horas")
     print("  Nmap deep           domingos 02:00")
     print("  Snyk                diario 01:00")
+    print("  cPanel stats        cada 15 minutos")
+    print("  cPanel security     cada 15 minutos")
+    print("  cPanel accounts     cada hora")
+    print("  cPanel logs (SSH)   cada 30 minutos")
     print("  Motor de alertas    cada 5 minutos")
     print("  Limpieza de datos   diaria 03:00")
     print("=" * 55)

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>cPanel / WHM — SOC Platform</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg:      #060910;
+      --surface: #0c1320;
+      --border:  #182436;
+      --text:    #c8d6e8;
+      --muted:   #3d5470;
+      --accent:  #00d4ff;
+      --green:   #00e676;
+      --red:     #ff4d6d;
+      --yellow:  #ffd166;
+      --orange:  #ff8c42;
+      --purple:  #bd93f9;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Syne', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 28px; }
+    body::before { content:''; position:fixed; inset:0; background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,0.01) 2px,rgba(0,212,255,0.01) 4px); pointer-events:none; z-index:999; }
+    .wrap { max-width: 1400px; margin: 0 auto; }
+
+    /* HEADER */
+    .header { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px; padding-bottom:20px; border-bottom:1px solid var(--border); }
+    .header-left h1 { font-size:30px; font-weight:800; letter-spacing:-0.5px; color:#fff; }
+    .header-left h1 span { color: var(--accent); }
+    .header-left p { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted); margin-top:6px; }
+    .header-right { display:flex; align-items:center; gap:12px; }
+    .badge { font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:8px 16px; border:1px solid var(--accent); color:var(--accent); border-radius:4px; letter-spacing:0.1em; text-transform:uppercase; }
+    .back-link { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); text-decoration:none; padding:8px 14px; border:1px solid var(--border); border-radius:4px; }
+    .back-link:hover { color:var(--accent); border-color:var(--accent); }
+
+    /* KPI GRID */
+    .kpi-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:12px; margin-bottom:24px; }
+    .kpi-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 14px; text-align:center; }
+    .kpi-card.kpi-green  { border-color:rgba(0,230,118,0.3); }
+    .kpi-card.kpi-red    { border-color:rgba(255,77,109,0.3); }
+    .kpi-card.kpi-yellow { border-color:rgba(255,209,102,0.3); }
+    .kpi-card.kpi-orange { border-color:rgba(255,140,66,0.3); }
+    .kpi-card.kpi-purple { border-color:rgba(189,147,249,0.3); }
+    .kpi-val  { font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; color:#fff; line-height:1; }
+    .kpi-val.kpi-red    { color:var(--red); }
+    .kpi-val.kpi-green  { color:var(--green); }
+    .kpi-val.kpi-yellow { color:var(--yellow); }
+    .kpi-val.kpi-orange { color:var(--orange); }
+    .kpi-val.kpi-purple { color:var(--purple); }
+    .kpi-lbl  { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-top:6px; }
+
+    /* SECTION */
+    .section-title { font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.15em; margin:24px 0 12px; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+    .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:16px; }
+    .panel  { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; }
+    .panel h3 { font-size:13px; font-weight:700; color:#fff; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; }
+    .panel h3 .count-badge { font-family:'JetBrains Mono',monospace; font-size:10px; padding:3px 8px; background:rgba(255,255,255,0.05); border-radius:999px; color:var(--muted); }
+
+    /* SERVER INFO */
+    .server-info { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+    .si-item { background:rgba(255,255,255,0.03); border-radius:6px; padding:10px 14px; }
+    .si-lbl { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; }
+    .si-val { font-family:'JetBrains Mono',monospace; font-size:14px; color:#fff; margin-top:4px; font-weight:700; }
+
+    /* TABLES */
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th { font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; padding:8px 10px; border-bottom:1px solid var(--border); text-align:left; }
+    td { padding:7px 10px; border-bottom:1px solid rgba(24,36,54,0.6); font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text); }
+    tr:last-child td { border-bottom:none; }
+    tr:hover td { background:rgba(255,255,255,0.02); }
+    .empty { color:var(--muted); text-align:center; padding:20px; }
+
+    /* BADGES */
+    .badge-type { font-family:'JetBrains Mono',monospace; font-size:9px; font-weight:700; padding:2px 7px; border-radius:4px; text-transform:uppercase; letter-spacing:0.06em; }
+    .bt-accepted           { background:rgba(0,230,118,0.15); color:var(--green); }
+    .bt-delivered          { background:rgba(0,212,255,0.12); color:var(--accent); }
+    .bt-rejected           { background:rgba(255,77,109,0.15); color:var(--red); }
+    .bt-connection_rejected { background:rgba(255,77,109,0.1); color:#ff8080; }
+    .bt-spam               { background:rgba(255,209,102,0.15); color:var(--yellow); }
+    .bt-virus              { background:rgba(189,147,249,0.2); color:var(--purple); }
+    .bt-bounce             { background:rgba(255,140,66,0.15); color:var(--orange); }
+
+    /* BANDWIDTH BAR */
+    .bw-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; font-family:'JetBrains Mono',monospace; font-size:11px; }
+    .bw-domain { width:200px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0; }
+    .bw-bar-wrap { flex:1; background:rgba(255,255,255,0.05); border-radius:3px; height:8px; }
+    .bw-bar { height:8px; border-radius:3px; background:var(--accent); }
+    .bw-val { width:65px; text-align:right; color:var(--muted); flex-shrink:0; }
+
+    /* CHART */
+    .chart-wrap { position:relative; height:220px; }
+
+    /* NO DATA */
+    .no-data { text-align:center; padding:40px; color:var(--muted); font-family:'JetBrains Mono',monospace; font-size:12px; }
+
+    @media (max-width: 1100px) {
+      .kpi-grid { grid-template-columns: repeat(4,1fr); }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .server-info { grid-template-columns: repeat(2,1fr); }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <h1>📧 cPanel / <span>WHM</span></h1>
+      <p id="header-host">Cargando...</p>
+    </div>
+    <div class="header-right">
+      <span class="badge" id="status-badge">Sin datos</span>
+      <a href="index.html" class="back-link">← SOC Index</a>
+    </div>
+  </div>
+
+  <!-- KPI CARDS -->
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-green">
+      <div class="kpi-val kpi-green" id="kpi-accepted">—</div>
+      <div class="kpi-lbl">Aceptados 24h</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-val" id="kpi-delivered">—</div>
+      <div class="kpi-lbl">Entregados 24h</div>
+    </div>
+    <div class="kpi-card kpi-red">
+      <div class="kpi-val kpi-red" id="kpi-rejected">—</div>
+      <div class="kpi-lbl">Rechazados 24h</div>
+    </div>
+    <div class="kpi-card kpi-yellow">
+      <div class="kpi-val kpi-yellow" id="kpi-spam">—</div>
+      <div class="kpi-lbl">Spam 24h</div>
+    </div>
+    <div class="kpi-card kpi-purple">
+      <div class="kpi-val kpi-purple" id="kpi-virus">—</div>
+      <div class="kpi-lbl">Virus 24h</div>
+    </div>
+    <div class="kpi-card kpi-orange">
+      <div class="kpi-val kpi-orange" id="kpi-bounce">—</div>
+      <div class="kpi-lbl">Rebotes 24h</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-val" id="kpi-queue">—</div>
+      <div class="kpi-lbl">Cola Exim</div>
+    </div>
+  </div>
+
+  <!-- SERVER INFO -->
+  <div class="section-title">Estado del servidor</div>
+  <div class="panel" style="margin-bottom:16px">
+    <div class="server-info">
+      <div class="si-item"><div class="si-lbl">Hostname</div><div class="si-val" id="si-hostname">—</div></div>
+      <div class="si-item"><div class="si-lbl">WHM Version</div><div class="si-val" id="si-version">—</div></div>
+      <div class="si-item"><div class="si-lbl">CPU Load 1/5/15m</div><div class="si-val" id="si-cpu">—</div></div>
+      <div class="si-item"><div class="si-lbl">Bandwidth mensual</div><div class="si-val" id="si-bw">—</div></div>
+    </div>
+  </div>
+
+  <!-- TIMELINE + BANDWIDTH -->
+  <div class="grid-2">
+    <div class="panel">
+      <h3>Eventos por hora — últimas 24h <span class="count-badge" id="chart-total">0 eventos</span></h3>
+      <div class="chart-wrap"><canvas id="chart-hourly"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>Bandwidth por dominio (mes actual)</h3>
+      <div id="bw-list" style="max-height:220px;overflow-y:auto;padding-right:4px"></div>
+    </div>
+  </div>
+
+  <!-- SPAM + IPS RECHAZADAS -->
+  <div class="section-title">Seguridad de correo</div>
+  <div class="grid-2">
+    <div class="panel">
+      <h3>Top IPs rechazadas (24h) <span class="count-badge" id="ips-count">0</span></h3>
+      <table>
+        <thead><tr><th>#</th><th>IP</th><th>Bloqueos</th><th>Razón</th></tr></thead>
+        <tbody id="ips-body"><tr><td colspan="4" class="empty">Sin datos aún</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h3>Top remitentes spam (24h) <span class="count-badge" id="spam-count">0</span></h3>
+      <table>
+        <thead><tr><th>#</th><th>Remitente</th><th>Mensajes</th><th>Score máx.</th></tr></thead>
+        <tbody id="spam-body"><tr><td colspan="4" class="empty">Sin datos aún</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- VIRUS -->
+  <div class="section-title">Detecciones de virus (últimos 7 días)</div>
+  <div class="panel" style="margin-bottom:16px">
+    <table>
+      <thead><tr><th>Hora</th><th>Remitente</th><th>IP</th><th>Detección</th></tr></thead>
+      <tbody id="virus-body"><tr><td colspan="4" class="empty">Sin detecciones 🟢</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- EVENTOS RECIENTES -->
+  <div class="section-title">Eventos recientes — últimas 6h</div>
+  <div class="panel" style="margin-bottom:16px">
+    <table>
+      <thead><tr><th>Hora</th><th>Tipo</th><th>Remitente</th><th>Destinatario</th><th>IP</th><th>Detalle</th></tr></thead>
+      <tbody id="recent-body"><tr><td colspan="6" class="empty">Cargando...</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- CUENTAS -->
+  <div class="section-title">Cuentas cPanel</div>
+  <div class="panel" style="margin-bottom:16px">
+    <table>
+      <thead><tr><th>Usuario</th><th>Dominio</th><th>Plan</th><th>Disco (MB)</th><th>Estado</th></tr></thead>
+      <tbody id="accounts-body"><tr><td colspan="5" class="empty">Cargando...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);text-align:center;padding:20px 0">
+    Leviathan SOC Platform · cPanel/WHM · Auto-refresh cada 60s · <span id="gen-at">—</span>
+  </div>
+
+</div>
+<script>
+const esc = s => s == null ? '—' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const fmt = n => n == null ? '—' : Number(n).toLocaleString('es-MX');
+
+function typeBadge(t) {
+  const labels = {
+    accepted: 'aceptado', delivered: 'entregado', rejected: 'rechazado',
+    connection_rejected: 'conn. rechazada', spam: 'spam', virus: 'virus', bounce: 'rebote'
+  };
+  return `<span class="badge-type bt-${t}">${labels[t]||t}</span>`;
+}
+
+let chartHourly = null;
+
+function renderChart(hourly) {
+  const labels = hourly.map(h => h.hour ? h.hour.substring(11,16) : '?');
+  const accepted  = hourly.map(h => h.accepted  || 0);
+  const rejected  = hourly.map(h => (h.rejected || 0) + (h.connection_rejected || 0));
+  const spam      = hourly.map(h => h.spam      || 0);
+  const virus     = hourly.map(h => h.virus     || 0);
+
+  const ctx = document.getElementById('chart-hourly').getContext('2d');
+  if (chartHourly) chartHourly.destroy();
+  chartHourly = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Aceptados',  data: accepted, backgroundColor: 'rgba(0,230,118,0.5)',  borderColor: '#00e676', borderWidth: 1 },
+        { label: 'Rechazados', data: rejected, backgroundColor: 'rgba(255,77,109,0.5)', borderColor: '#ff4d6d', borderWidth: 1 },
+        { label: 'Spam',       data: spam,     backgroundColor: 'rgba(255,209,102,0.5)',borderColor: '#ffd166', borderWidth: 1 },
+        { label: 'Virus',      data: virus,    backgroundColor: 'rgba(189,147,249,0.5)',borderColor: '#bd93f9', borderWidth: 1 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 10 } } } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 9 } }, grid: { color: '#182436' } },
+        y: { stacked: true, ticks: { color: '#3d5470', font: { family: 'JetBrains Mono', size: 9 } }, grid: { color: '#182436' } },
+      }
+    }
+  });
+}
+
+function renderBandwidth(domains) {
+  const el = document.getElementById('bw-list');
+  if (!domains || !domains.length) { el.innerHTML = '<div class="no-data">Sin datos de bandwidth</div>'; return; }
+  const max = domains[0].gb || 1;
+  el.innerHTML = domains.slice(0, 15).map(d => `
+    <div class="bw-row">
+      <div class="bw-domain" title="${esc(d.domain)}">${esc(d.domain)}</div>
+      <div class="bw-bar-wrap"><div class="bw-bar" style="width:${Math.max(2, (d.gb/max)*100)}%"></div></div>
+      <div class="bw-val">${d.gb >= 1 ? d.gb.toFixed(2)+' GB' : d.mb+' MB'}</div>
+    </div>`).join('');
+}
+
+function render(data) {
+  const s  = data.summary_24h || {};
+  const sv = data.server       || {};
+
+  // Header
+  document.getElementById('header-host').textContent = sv.hostname || 'vps-worldwipes.com';
+  document.getElementById('status-badge').textContent = 'ONLINE';
+  document.getElementById('gen-at').textContent = data.generated_at || '';
+
+  // KPIs
+  document.getElementById('kpi-accepted').textContent  = fmt(s.accepted);
+  document.getElementById('kpi-delivered').textContent = fmt(s.delivered);
+  document.getElementById('kpi-rejected').textContent  = fmt((s.rejected||0) + (s.connection_rejected||0));
+  document.getElementById('kpi-spam').textContent      = fmt(s.spam);
+  document.getElementById('kpi-virus').textContent     = fmt(s.virus);
+  document.getElementById('kpi-bounce').textContent    = fmt(s.bounce);
+  document.getElementById('kpi-queue').textContent     = sv.queue_count != null ? fmt(sv.queue_count) : '—';
+
+  // Server info
+  document.getElementById('si-hostname').textContent = sv.hostname || '—';
+  document.getElementById('si-version').textContent  = sv.version  || '—';
+  document.getElementById('si-cpu').textContent = sv.cpu_load_1 != null
+    ? `${sv.cpu_load_1.toFixed(2)} / ${sv.cpu_load_5.toFixed(2)} / ${sv.cpu_load_15.toFixed(2)}`
+    : '—';
+  document.getElementById('si-bw').textContent = sv.bw_total_gb ? `${sv.bw_total_gb} GB` : '—';
+
+  // Timeline chart
+  renderChart(data.hourly || []);
+  const totalEvents = Object.values(s).reduce((a,b) => a + (b||0), 0);
+  document.getElementById('chart-total').textContent = fmt(totalEvents) + ' eventos';
+
+  // Bandwidth
+  renderBandwidth(data.bandwidth_by_domain || []);
+
+  // Top IPs rechazadas
+  const ips = data.top_rejected_ips || [];
+  document.getElementById('ips-count').textContent = ips.length;
+  document.getElementById('ips-body').innerHTML = !ips.length
+    ? '<tr><td colspan="4" class="empty">Sin rechazos 🟢</td></tr>'
+    : ips.map((r,i) => `<tr>
+        <td style="color:var(--muted)">${i+1}</td>
+        <td style="color:var(--red);font-weight:700">${esc(r.remote_ip)}</td>
+        <td style="color:var(--red)">${fmt(r.n)}</td>
+        <td style="color:var(--muted);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((r.reason||'').substring(0,80))}</td>
+      </tr>`).join('');
+
+  // Top spam senders
+  const spam = data.top_spam_senders || [];
+  document.getElementById('spam-count').textContent = spam.length;
+  document.getElementById('spam-body').innerHTML = !spam.length
+    ? '<tr><td colspan="4" class="empty">Sin spam detectado 🟢</td></tr>'
+    : spam.map((r,i) => `<tr>
+        <td style="color:var(--muted)">${i+1}</td>
+        <td style="color:var(--yellow);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.sender)}</td>
+        <td style="color:var(--yellow)">${fmt(r.n)}</td>
+        <td style="color:var(--muted)">${r.max_score != null ? parseFloat(r.max_score).toFixed(1) : '—'}</td>
+      </tr>`).join('');
+
+  // Virus
+  const viruses = data.virus_events || [];
+  document.getElementById('virus-body').innerHTML = !viruses.length
+    ? '<tr><td colspan="4" class="empty">Sin detecciones 🟢</td></tr>'
+    : viruses.map(r => `<tr>
+        <td style="color:var(--muted)">${esc((r.event_time||'').substring(0,16))}</td>
+        <td style="color:var(--purple)">${esc(r.sender)}</td>
+        <td style="color:var(--muted)">${esc(r.remote_ip)}</td>
+        <td style="color:var(--purple);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((r.reject_reason||'').substring(0,120))}</td>
+      </tr>`).join('');
+
+  // Eventos recientes
+  const recent = data.recent_events || [];
+  document.getElementById('recent-body').innerHTML = !recent.length
+    ? '<tr><td colspan="6" class="empty">Sin eventos recientes</td></tr>'
+    : recent.slice(0, 100).map(r => `<tr>
+        <td style="color:var(--muted)">${esc((r.event_time||'').substring(11,19))}</td>
+        <td>${typeBadge(r.event_type)}</td>
+        <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.sender)}</td>
+        <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.recipient)}</td>
+        <td style="color:var(--muted)">${esc(r.remote_ip)}</td>
+        <td style="color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${
+          r.spam_score != null ? '⚠ score: '+parseFloat(r.spam_score).toFixed(1)
+          : esc((r.reject_reason||'').substring(0,80))}</td>
+      </tr>`).join('');
+
+  // Cuentas
+  const accts = data.accounts || [];
+  document.getElementById('accounts-body').innerHTML = !accts.length
+    ? '<tr><td colspan="5" class="empty">Sin datos de cuentas</td></tr>'
+    : accts.map(a => `<tr>
+        <td style="color:var(--accent)">${esc(a.username)}</td>
+        <td>${esc(a.domain)}</td>
+        <td style="color:var(--muted)">${esc(a.plan)}</td>
+        <td style="color:var(--muted)">${a.disk_used_mb != null ? parseFloat(a.disk_used_mb).toFixed(0)+' MB' : '—'}</td>
+        <td>${a.suspended ? '<span class="badge-type bt-rejected">SUSPENDIDA</span>' : '<span class="badge-type bt-accepted">Activa</span>'}</td>
+      </tr>`).join('');
+}
+
+async function loadData() {
+  try {
+    const res = await fetch('cpanel_dashboard_data.json?t=' + Date.now());
+    if (!res.ok) {
+      document.getElementById('status-badge').textContent = 'SIN DATOS';
+      document.getElementById('recent-body').innerHTML = '<tr><td colspan="6" class="empty">Esperando primera recolección de logs (SSH)...</td></tr>';
+      return;
+    }
+    render(await res.json());
+  } catch(e) {
+    console.error('Error cargando dashboard:', e);
+  }
+}
+
+loadData();
+setInterval(loadData, 60000);
+</script>
+</body>
+</html>

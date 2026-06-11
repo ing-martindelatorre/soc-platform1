@@ -101,6 +101,26 @@ except Exception as e:
     _fortinet = _FallbackFortinet()
 
 # ---------------------------------------------------------------------------
+# cPanel / WHM
+# ---------------------------------------------------------------------------
+try:
+    from app.modules.cpanel.service import run_cpanel_pipeline
+
+    class _CpanelPipeline:
+        name = "cpanel"
+        def execute(self, **kwargs):
+            return run_cpanel_pipeline(**kwargs)
+
+    _cpanel = _CpanelPipeline()
+except Exception as e:
+    logger.warning(f"[registry] cPanel no disponible: {e}")
+    class _FallbackCpanel:
+        name = "cpanel"
+        def execute(self, **kwargs):
+            return {"ok": False, "module": "cpanel", "error": "no disponible"}
+    _cpanel = _FallbackCpanel()
+
+# ---------------------------------------------------------------------------
 # Registro central
 # ---------------------------------------------------------------------------
 MODULES = {
@@ -108,6 +128,7 @@ MODULES = {
     "snyk":     _snyk,
     "nmap":     _nmap,
     "fortinet": _fortinet,
+    "cpanel":   _cpanel,
 }
 
 

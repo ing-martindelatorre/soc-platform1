@@ -21,6 +21,12 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
+except ImportError:
+    pass
+
+try:
     import psycopg2
     from psycopg2.extras import RealDictCursor
 except ImportError:
@@ -50,6 +56,7 @@ DASHBOARD_REFRESH = {
     "fortinet":         int(os.getenv("DASH_REFRESH_FORTINET",         "60")),
     "fortinet_threats": int(os.getenv("DASH_REFRESH_FORTINET_THREATS", "120")),
     "snyk":             int(os.getenv("DASH_REFRESH_SNYK",             "300")),
+    "cpanel":           int(os.getenv("DASH_REFRESH_CPANEL",           "300")),
 }
 
 # =============================================================================
@@ -60,6 +67,7 @@ MODULE_STATUS: dict[str, dict] = {
     "nmap":     {"last_update": None, "status": "pending", "records": 0, "health": {}},
     "fortinet": {"last_update": None, "status": "pending", "records": 0, "health": {}},
     "snyk":     {"last_update": None, "status": "pending", "records": 0, "health": {}},
+    "cpanel":   {"last_update": None, "status": "pending", "records": 0, "health": {}},
 }
 
 
@@ -702,6 +710,215 @@ def refresh_snyk():
 
 
 # =============================================================================
+# CPANEL / WHM
+# =============================================================================
+def build_cpanel_health() -> dict:
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            # Último stat registrado
+            cur.execute("""
+                SELECT cpu_load_1, cpu_load_5, cpu_load_15, mail_queue, hostname, version
+                FROM cpanel_server_stats ORDER BY collected_at DESC LIMIT 1
+            """)
+            stat = cur.fetchone() or {}
+
+            # Cuentas suspendidas (último snapshot de accounts)
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM cpanel_accounts
+                WHERE suspended = TRUE
+                AND collected_at = (SELECT MAX(collected_at) FROM cpanel_accounts)
+            """)
+            suspended = int((cur.fetchone() or {}).get("n", 0))
+
+            # Total de cuentas
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM cpanel_accounts
+                WHERE collected_at = (SELECT MAX(collected_at) FROM cpanel_accounts)
+            """)
+            total_accts = int((cur.fetchone() or {}).get("n", 0))
+
+            # Bandwidth del mes (último stat)
+            cur.execute("""
+                SELECT payload->'bandwidth'->'data'->>'totalused' AS bw
+                FROM cpanel_server_stats ORDER BY collected_at DESC LIMIT 1
+            """)
+            bw_row = cur.fetchone() or {}
+            bw_bytes = int(bw_row.get("bw") or 0)
+            bw_gb = round(bw_bytes / 1_073_741_824, 2) if bw_bytes else None
+
+    return {
+        "cpu_load_1":   float(stat.get("cpu_load_1") or 0),
+        "cpu_load_5":   float(stat.get("cpu_load_5") or 0),
+        "cpu_load_15":  float(stat.get("cpu_load_15") or 0),
+        "mail_queue":   stat.get("mail_queue"),
+        "suspended":    suspended,
+        "total_accts":  total_accts,
+        "bw_gb":        bw_gb,
+        "hostname":     stat.get("hostname"),
+        "version":      stat.get("version"),
+    }
+
+
+def build_cpanel_dashboard_data() -> dict:
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            # Último stat
+            cur.execute("""
+                SELECT cpu_load_1, cpu_load_5, cpu_load_15, hostname, version,
+                       mail_queue, collected_at,
+                       payload->'bandwidth'->'data'->>'totalused' AS bw_bytes,
+                       payload->'bandwidth'->'data'->'acct'       AS bw_accts
+                FROM cpanel_server_stats ORDER BY collected_at DESC LIMIT 1
+            """)
+            stat = cur.fetchone() or {}
+
+            # Bandwidth por dominio (del último stat)
+            bw_bytes = int(stat.get("bw_bytes") or 0)
+            bw_accts = stat.get("bw_accts") or []
+            bw_domains = []
+            for acct in (bw_accts if isinstance(bw_accts, list) else []):
+                for domain_entry in (acct.get("bwusage") or []):
+                    usage = int(domain_entry.get("usage") or 0)
+                    if usage > 0:
+                        bw_domains.append({
+                            "domain": domain_entry.get("domain"),
+                            "gb":     round(usage / 1_073_741_824, 3),
+                            "mb":     round(usage / 1_048_576, 1),
+                        })
+            bw_domains.sort(key=lambda x: x["gb"], reverse=True)
+
+            # Resumen de eventos mail últimas 24h
+            cur.execute("""
+                SELECT event_type, COUNT(*) AS n
+                FROM cpanel_mail_events
+                WHERE event_time >= NOW() - INTERVAL '24 hours'
+                GROUP BY event_type
+            """)
+            event_counts = {r["event_type"]: int(r["n"]) for r in cur.fetchall()}
+
+            # Tendencia por hora últimas 24h
+            cur.execute("""
+                SELECT date_trunc('hour', event_time) AS hour,
+                       event_type, COUNT(*) AS n
+                FROM cpanel_mail_events
+                WHERE event_time >= NOW() - INTERVAL '24 hours'
+                GROUP BY 1, 2 ORDER BY 1
+            """)
+            hourly_raw = cur.fetchall()
+            hourly: dict = {}
+            for r in hourly_raw:
+                h = str(r["hour"])[:16] if r["hour"] else "?"
+                if h not in hourly:
+                    hourly[h] = {}
+                hourly[h][r["event_type"]] = int(r["n"])
+            hourly_list = [{"hour": h, **v} for h, v in sorted(hourly.items())]
+
+            # Top IPs rechazadas (últimas 24h)
+            cur.execute("""
+                SELECT remote_ip, COUNT(*) AS n,
+                       MAX(reject_reason) AS reason
+                FROM cpanel_mail_events
+                WHERE event_type IN ('rejected','connection_rejected')
+                  AND event_time >= NOW() - INTERVAL '24 hours'
+                  AND remote_ip IS NOT NULL
+                GROUP BY remote_ip ORDER BY n DESC LIMIT 20
+            """)
+            top_rejected_ips = [dict(r) for r in cur.fetchall()]
+
+            # Top spam senders (últimas 24h)
+            cur.execute("""
+                SELECT sender, COUNT(*) AS n,
+                       ROUND(AVG(spam_score)::numeric, 2) AS avg_score,
+                       MAX(spam_score) AS max_score
+                FROM cpanel_mail_events
+                WHERE event_type = 'spam'
+                  AND event_time >= NOW() - INTERVAL '24 hours'
+                  AND sender IS NOT NULL
+                GROUP BY sender ORDER BY n DESC LIMIT 20
+            """)
+            top_spam = [dict(r) for r in cur.fetchall()]
+
+            # Detecciones de virus
+            cur.execute("""
+                SELECT sender, remote_ip, reject_reason, event_time
+                FROM cpanel_mail_events
+                WHERE event_type = 'virus'
+                  AND event_time >= NOW() - INTERVAL '7 days'
+                ORDER BY event_time DESC LIMIT 50
+            """)
+            virus_events = [dict(r) for r in cur.fetchall()]
+
+            # Eventos recientes (últimas 6h)
+            cur.execute("""
+                SELECT event_time, event_type, sender, recipient,
+                       remote_ip, spam_score, reject_reason
+                FROM cpanel_mail_events
+                WHERE event_time >= NOW() - INTERVAL '6 hours'
+                ORDER BY event_time DESC LIMIT 200
+            """)
+            recent = [dict(r) for r in cur.fetchall()]
+
+            # Cuentas
+            cur.execute("""
+                SELECT username, domain, plan, suspended, disk_used_mb
+                FROM cpanel_accounts
+                WHERE collected_at = (SELECT MAX(collected_at) FROM cpanel_accounts)
+                ORDER BY disk_used_mb DESC NULLS LAST
+            """)
+            accounts = [dict(r) for r in cur.fetchall()]
+
+            # Cola de correo (de cpanel_server_stats.mail_queue)
+            queue_count = stat.get("mail_queue")
+
+    return {
+        "generated_at":    now_str(),
+        "server": {
+            "hostname":    stat.get("hostname"),
+            "version":     stat.get("version"),
+            "cpu_load_1":  float(stat.get("cpu_load_1") or 0),
+            "cpu_load_5":  float(stat.get("cpu_load_5") or 0),
+            "cpu_load_15": float(stat.get("cpu_load_15") or 0),
+            "bw_total_gb": round(bw_bytes / 1_073_741_824, 2) if bw_bytes else 0,
+            "queue_count": queue_count,
+        },
+        "summary_24h":     {
+            "accepted":            event_counts.get("accepted", 0),
+            "delivered":           event_counts.get("delivered", 0),
+            "rejected":            event_counts.get("rejected", 0),
+            "connection_rejected": event_counts.get("connection_rejected", 0),
+            "spam":                event_counts.get("spam", 0),
+            "virus":               event_counts.get("virus", 0),
+            "bounce":              event_counts.get("bounce", 0),
+        },
+        "hourly":              hourly_list,
+        "top_rejected_ips":    top_rejected_ips,
+        "top_spam_senders":    top_spam,
+        "virus_events":        virus_events,
+        "recent_events":       recent,
+        "bandwidth_by_domain": bw_domains,
+        "accounts":            accounts,
+    }
+
+
+def refresh_cpanel():
+    while True:
+        try:
+            health = build_cpanel_health()
+            update_status("cpanel", "ok", health["total_accts"], health)
+
+            dash_data = build_cpanel_dashboard_data()
+            (BASE_DIR / "cpanel_dashboard_data.json").write_text(
+                json.dumps(dash_data, indent=2, ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+            print(f"[cpanel] OK — cuentas={health['total_accts']}, suspendidas={health['suspended']}, cpu={health['cpu_load_1']} | {now_str()}")
+        except Exception as e:
+            update_status("cpanel", "error")
+            print(f"[cpanel] ERROR: {e}")
+        time.sleep(DASHBOARD_REFRESH["cpanel"])
+
+
+# =============================================================================
 # INDEX STATUS JSON
 # =============================================================================
 def refresh_index_status():
@@ -1046,6 +1263,7 @@ def main():
         threading.Thread(target=refresh_fortinet_threats, daemon=True, name="fortinet-threats"),
         threading.Thread(target=cleanup_fortinet_threats, daemon=True, name="forti-cleanup"),
         threading.Thread(target=refresh_snyk,             daemon=True, name="snyk"),
+        threading.Thread(target=refresh_cpanel,           daemon=True, name="cpanel"),
         threading.Thread(target=refresh_index_status,     daemon=True, name="index-status"),
         threading.Thread(target=run_alert_engine,         daemon=True, name="alert-engine"),
         threading.Thread(target=start_http_server,        daemon=True, name="http"),

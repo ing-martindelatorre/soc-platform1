@@ -11,11 +11,11 @@ def build_parser():
 
     parser.add_argument(
         "module",
-        choices=["sentinel", "snyk", "nmap", "fortinet"],
+        choices=["sentinel", "snyk", "nmap", "fortinet", "cpanel"],
         help="module to run"
     )
 
-    parser.add_argument("--mode", choices=["config", "logs"], default="config")
+    parser.add_argument("--mode", choices=["config", "logs", "stats", "security", "accounts"], default="config")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--csv-path")
     parser.add_argument("--log-path")

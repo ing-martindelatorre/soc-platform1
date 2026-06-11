@@ -4,3 +4,8 @@ venv/
 dashboard/*.json
 
 repos_snyk_batch.txt
+
+__pycache__/
+*.pyc
+data/
+result.txt

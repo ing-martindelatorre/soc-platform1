@@ -1,0 +1,20 @@
+[Unit]
+Description=SOC Platform 1 — Scheduler
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=zidane
+WorkingDirectory=/home/zidane/soc-platform1
+EnvironmentFile=/home/zidane/soc-platform1/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/zidane/soc-platform1/venv/bin/python -m app.pipeline.scheduler
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=soc-platform1
+
+[Install]
+WantedBy=multi-user.target

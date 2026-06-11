@@ -326,6 +326,32 @@
       <div class="card-update" id="upd-snyk">—</div>
     </a>
 
+    <!-- CPANEL / WHM -->
+    <div class="module-card hc-grey" id="card-cpanel" style="cursor:pointer" onclick="window.location.href='cpanel_dashboard.html'">
+      <div class="card-header">
+        <div class="card-icon">📧</div>
+        <div class="card-right">
+          <div class="semaforo-badge sb-grey" id="health-cpanel">Sin datos</div>
+          <div class="online-pill"><span class="online-dot" id="dot-cpanel"></span><span id="txt-cpanel">—</span></div>
+        </div>
+      </div>
+      <div class="card-title">cPanel / WHM</div>
+      <div class="health-rows" id="rows-cpanel">
+        <div class="health-row"><span class="hl">cuentas suspendidas</span><span class="hv hv-m">—</span></div>
+        <div class="health-row"><span class="hl">CPU load (1m)</span><span class="hv hv-m">—</span></div>
+        <div class="health-row"><span class="hl">bandwidth mes</span><span class="hv hv-m">—</span></div>
+      </div>
+      <div class="thresholds">
+        <span class="tg">🟢 0 suspendidas</span> &nbsp;
+        <span class="ty">🟡 1–2</span> &nbsp;
+        <span class="tr">🔴 3+</span>
+      </div>
+      <div class="card-meta">
+        <div class="card-stat"><div class="val" id="val-cpanel">—</div><div class="lbl">cuentas totales</div></div>
+      </div>
+      <div class="card-update" id="upd-cpanel">—</div>
+    </div>
+
   </div>
 
   <div class="section-title">Frecuencias de recolección</div>
@@ -338,6 +364,7 @@
         <tr><td>Fortinet Threats</td><td><span class="freq-tag fm">cada 15 min</span></td><td><span class="freq-tag fm">cada 2 min</span></td><td>Tráfico y amenazas en memoria</td></tr>
         <tr><td>Nmap</td><td><span class="freq-tag fs">cada 6 horas</span></td><td><span class="freq-tag fs">cada 5 min</span></td><td>Discovery de red</td></tr>
         <tr><td>Snyk</td><td><span class="freq-tag fs">domingos 1am</span></td><td><span class="freq-tag fs">cada 5 min</span></td><td>Scans de repositorios</td></tr>
+        <tr><td>cPanel / WHM</td><td><span class="freq-tag fm">cada 15 min</span></td><td><span class="freq-tag fs">cada 5 min</span></td><td>Mail server, cuentas, bandwidth</td></tr>
       </tbody>
     </table>
   </div>
@@ -356,6 +383,7 @@ function getHealth(mod, value) {
     nmap:             [0, 50],
     snyk:             [0, 10],
     'fortinet-threats': [0, 10],
+    cpanel:             [0, 2],
   }[mod] || [0, 0];
   if (value <= t[0]) return 'green';
   if (value <= t[1]) return 'yellow';
@@ -508,6 +536,15 @@ async function loadStatus() {
       ['críticas', skh.critical, hvClass(getHealth('snyk', skh.critical))],
       ['high',     skh.high,     (skh.high||0) > 100 ? 'hv-y' : 'hv-m'],
       ['medium',   skh.medium,   'hv-m'],
+    ]));
+
+    // CPANEL
+    const cp = d.cpanel || {};
+    const cph = cp.health || {};
+    healths.push(updateCard('cpanel', cp.status==='ok', cph.suspended, cp.records, cp.last_update, [
+      ['cuentas suspendidas', cph.suspended,  hvClass(getHealth('cpanel', cph.suspended))],
+      ['CPU load (1m)',       cph.cpu_load_1 !== undefined ? cph.cpu_load_1.toFixed(2) : null, (cph.cpu_load_1||0) > 4 ? 'hv-r' : (cph.cpu_load_1||0) > 2 ? 'hv-y' : 'hv-m'],
+      ['bandwidth mes (GB)',  cph.bw_gb,      'hv-m'],
     ]));
 
     updateGlobal(healths);
