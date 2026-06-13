@@ -312,7 +312,7 @@
 
     <div class="nav-tabs">
       <button class="nav-tab active" onclick="showTab('rules')">Reglas de Alerta</button>
-      <button class="nav-tab" onclick="showTab('new-rule')">+ Nueva Regla</button>
+      <button class="nav-tab" onclick="newRule()">+ Nueva Regla</button>
       <button class="nav-tab" onclick="showTab('log')">Historial de Alertas</button>
       <button class="nav-tab" onclick="showTab('smtp')">Configuración SMTP</button>
     </div>
@@ -322,7 +322,7 @@
       <div class="panel">
         <div class="panel-header">
           <div class="panel-title">Reglas configuradas</div>
-          <button class="btn btn-accent" onclick="showTab('new-rule')">+ Nueva regla</button>
+          <button class="btn btn-accent" onclick="newRule()">+ Nueva regla</button>
         </div>
         <div class="table-wrap">
           <table id="rules-table">
@@ -349,7 +349,7 @@
     <!-- ── TAB: NUEVA REGLA ─────────────────────────────────────────────── -->
     <div class="tab-pane" id="tab-new-rule">
       <div class="panel">
-        <div class="panel-title">Nueva regla de alerta</div>
+        <div class="panel-title" id="rule-form-title">Nueva regla de alerta</div>
 
         <div style="margin-top:20px">
           <div class="form-grid">
@@ -422,8 +422,8 @@
           </div>
 
           <div class="btn-row">
-            <button class="btn btn-muted" onclick="showTab('rules')">Cancelar</button>
-            <button class="btn btn-green" onclick="saveRule()">Guardar regla</button>
+            <button class="btn btn-muted" onclick="cancelRuleForm()">Cancelar</button>
+            <button class="btn btn-green" id="btn-save-rule" onclick="saveRule()">Guardar regla</button>
           </div>
         </div>
       </div>
@@ -612,11 +612,15 @@ function updateValueOptions() {
 }
 
 // ─── CRUD REGLAS ──────────────────────────────────────────────────────────────
+let _editRuleId = null;
+let _rulesCache = [];
+
 async function loadRules() {
   try {
     const res  = await fetch('/api/config/rules', { headers: authHeaders() });
     const data = await res.json();
-    renderRules(data.rules || []);
+    _rulesCache = data.rules || [];
+    renderRules(_rulesCache);
   } catch(e) {
     console.error('Error cargando reglas:', e);
   }
@@ -648,11 +652,73 @@ function renderRules(rules) {
           <span class="toggle-slider"></span>
         </label>
       </td>
-      <td>
-        <button class="btn btn-red" style="padding:5px 12px;font-size:10px" onclick="deleteRule(${r.id}, '${esc(r.name)}')">Eliminar</button>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-muted" style="padding:5px 12px;font-size:10px" onclick="editRule(${r.id})">Editar</button>
+        <button class="btn btn-red"   style="padding:5px 12px;font-size:10px" onclick="deleteRule(${r.id}, '${esc(r.name)}')">Eliminar</button>
       </td>
     </tr>
   `).join('');
+}
+
+function newRule() {
+  _editRuleId = null;
+  ['r-name','r-subject','r-recipients'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('r-cooldown').value = '60';
+  document.getElementById('r-condition-type').value = 'match';
+  document.getElementById('r-threshold').value = '10';
+  document.getElementById('r-module').value = 'sentinel';
+  updateConditionOptions();
+  toggleThreshold();
+  document.getElementById('rule-form-title').textContent = 'Nueva regla de alerta';
+  document.getElementById('btn-save-rule').textContent = 'Guardar regla';
+  showTab('new-rule');
+}
+
+function editRule(id) {
+  const rule = _rulesCache.find(r => r.id === id);
+  if (!rule) return;
+
+  _editRuleId = id;
+
+  document.getElementById('r-name').value = rule.name || '';
+
+  const modSel = document.getElementById('r-module');
+  modSel.value = rule.module || 'sentinel';
+  updateConditionOptions();
+
+  const fieldSel = document.getElementById('r-field');
+  fieldSel.value = rule.condition_field || '';
+  if (!fieldSel.value && rule.condition_field) {
+    const opt = new Option(rule.condition_field, rule.condition_field);
+    fieldSel.add(opt);
+    fieldSel.value = rule.condition_field;
+  }
+  updateValueOptions();
+
+  const valSel = document.getElementById('r-value');
+  valSel.value = rule.condition_value || '';
+  if (!valSel.value && rule.condition_value) {
+    const opt = new Option(rule.condition_value, rule.condition_value);
+    valSel.add(opt);
+    valSel.value = rule.condition_value;
+  }
+
+  document.getElementById('r-condition-type').value = rule.condition_type || 'match';
+  toggleThreshold();
+  document.getElementById('r-threshold').value = rule.threshold_count || 10;
+  document.getElementById('r-cooldown').value   = rule.cooldown_minutes || 60;
+  document.getElementById('r-subject').value    = rule.subject || '';
+  document.getElementById('r-recipients').value = (rule.recipients || []).join('\n');
+
+  document.getElementById('rule-form-title').textContent = 'Editar regla de alerta';
+  document.getElementById('btn-save-rule').textContent = 'Guardar cambios';
+
+  showTab('new-rule');
+}
+
+function cancelRuleForm() {
+  _editRuleId = null;
+  showTab('rules');
 }
 
 function toggleThreshold() {
@@ -677,25 +743,23 @@ async function saveRule() {
     return;
   }
 
+  const payload = {
+    name, module: module_,
+    condition_field: field, condition_value: value,
+    condition_type: conditionType, threshold_count: thresholdCount,
+    cooldown_minutes: cooldown, subject, recipients,
+  };
+
+  const isEdit  = _editRuleId !== null;
+  const url     = isEdit ? `/api/config/rules/${_editRuleId}` : '/api/config/rules';
+  const method  = isEdit ? 'PUT' : 'POST';
+
   try {
-    const res = await fetch('/api/config/rules', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        name, module: module_,
-        condition_field: field, condition_value: value,
-        condition_type: conditionType, threshold_count: thresholdCount,
-        cooldown_minutes: cooldown, subject, recipients,
-      }),
-    });
+    const res  = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
-      showToast('Regla creada correctamente');
-      ['r-name','r-subject','r-recipients'].forEach(id => document.getElementById(id).value = '');
-      document.getElementById('r-cooldown').value = '60';
-      document.getElementById('r-condition-type').value = 'match';
-      document.getElementById('r-threshold').value = '10';
-      toggleThreshold();
+      showToast(isEdit ? 'Regla actualizada correctamente' : 'Regla creada correctamente');
+      _editRuleId = null;
       showTab('rules');
       loadRules();
     } else {

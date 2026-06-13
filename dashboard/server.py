@@ -984,7 +984,7 @@ class SOCHandler(SimpleHTTPRequestHandler):
         self.send_response(204)
         if CORS_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", CORS_ORIGIN)
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, X-SOC-Token")
         self.end_headers()
 
@@ -1005,6 +1005,13 @@ class SOCHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith("/api/"):
             self._handle_api_post()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_PUT(self):
+        if self.path.startswith("/api/"):
+            self._handle_api_put()
         else:
             self.send_response(404)
             self.end_headers()
@@ -1131,6 +1138,52 @@ class SOCHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
 
+        else:
+            self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
+
+    def _handle_api_put(self):
+        path = self.path.split("?")[0]
+        if not self._require_auth():
+            return
+        if path.startswith("/api/config/rules/"):
+            rule_id  = path.split("/")[-1]
+            body     = self._read_body()
+            required = ["name", "module", "condition_field", "condition_value", "recipients", "subject"]
+            if not all(body.get(f) for f in required):
+                self._send_json({"ok": False, "error": "Faltan campos requeridos"}, 400)
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            UPDATE alert_rules SET
+                                name             = %s,
+                                module           = %s,
+                                condition_field  = %s,
+                                condition_value  = %s,
+                                condition_type   = %s,
+                                threshold_count  = %s,
+                                recipients       = %s,
+                                subject          = %s,
+                                cooldown_minutes = %s,
+                                updated_at       = NOW()
+                            WHERE id = %s
+                        """, (
+                            body["name"], body["module"],
+                            body["condition_field"], body["condition_value"],
+                            body.get("condition_type", "match"),
+                            int(body.get("threshold_count") or 1),
+                            body["recipients"], body["subject"],
+                            int(body.get("cooldown_minutes") or 60),
+                            rule_id,
+                        ))
+                        if cur.rowcount == 0:
+                            self._send_json({"ok": False, "error": "Regla no encontrada"}, 404)
+                            return
+                    conn.commit()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
         else:
             self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
 
