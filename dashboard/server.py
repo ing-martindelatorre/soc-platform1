@@ -33,6 +33,14 @@ except ImportError:
     print("[ERROR] Falta psycopg2-binary. Instala con: pip install psycopg2-binary")
     sys.exit(1)
 
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from app.modules.ip_intel.enricher import enrich_traffic_records, summarize_enriched
+    _IP_INTEL_AVAILABLE = True
+except Exception as _ip_intel_err:
+    _IP_INTEL_AVAILABLE = False
+    print(f"[WARN] ip_intel no disponible, tráfico sin enriquecer: {_ip_intel_err}")
+
 # =============================================================================
 # CONFIG
 # =============================================================================
@@ -503,6 +511,15 @@ def build_fortinet_threats_data(hours: int = 24, device_name: str | None = None)
             """, df_param)
             vpn_records = [dict(r) for r in cur.fetchall()]
 
+    # Enriquecer tráfico con reputación de IPs y descartar infraestructura conocida
+    if _IP_INTEL_AVAILABLE:
+        traffic_records = enrich_traffic_records(traffic_records, filter_known=True)
+        # Recalcular conteos desde registros enriquecidos para que el resumen sea consistente
+        _tc = Counter(r.get("classification", "normal") for r in traffic_records)
+        counts["traffic"] = dict(_tc)
+
+    with db_connect() as conn:
+        with conn.cursor() as cur:
             cur.execute(f"""
                 SELECT
                     DATE_TRUNC('hour', collected_at) AS hora,
