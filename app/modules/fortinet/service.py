@@ -19,7 +19,7 @@ logger = logging.getLogger("soc-platform")
 
 def run_fortinet_pipeline(**kwargs) -> Dict[str, Any]:
     mode      = kwargs.get("mode", "config")
-    device_id = kwargs.get("device_id")  # None = todos los activos
+    device_id = kwargs.pop("device_id", None)  # None = todos los activos
 
     device_ids: List[int] = [device_id] if device_id is not None else get_active_device_ids()
 
