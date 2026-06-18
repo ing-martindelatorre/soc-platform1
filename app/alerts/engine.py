@@ -557,6 +557,8 @@ def evaluate_and_send() -> int:
         cur.execute("SELECT * FROM alert_rules WHERE enabled = TRUE ORDER BY id")
         rules = cur.fetchall()
 
+        now_utc = datetime.now(timezone.utc)
+
         for rule in rules:
             rule_id         = rule["id"]
             module          = rule["module"]
@@ -565,6 +567,18 @@ def evaluate_and_send() -> int:
             cooldown        = rule["cooldown_minutes"]
             condition_type  = rule.get("condition_type", "match")
             threshold_count = int(rule.get("threshold_count") or 1)
+
+            # ── 0. Cooldown a nivel de regla ──────────────────────────────────
+            last_sent = rule.get("last_sent_at")
+            if last_sent is not None:
+                if last_sent.tzinfo is None:
+                    last_sent = last_sent.replace(tzinfo=timezone.utc)
+                if (now_utc - last_sent) < timedelta(minutes=cooldown):
+                    logger.debug(
+                        f"[alerts] Regla {rule_id} ({rule['name']}): "
+                        f"en cooldown hasta {last_sent + timedelta(minutes=cooldown):%H:%M}"
+                    )
+                    continue
 
             # ── 1. Obtener eventos agregados ───────────────────────────────────
             query = QUERIES.get(module, {}).get(field)
