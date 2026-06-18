@@ -294,7 +294,7 @@ QUERIES = {
     "fortinet": {
         "classification": """
             SELECT
-                COALESCE(srcname, srcip, '—')         AS source_label,
+                device_name || ': ' || COALESCE(srcname, srcip, '—') AS source_label,
                 COALESCE(app, classification, '—')    AS detail,
                 classification                        AS severity,
                 COUNT(*)                              AS event_count,
@@ -305,13 +305,13 @@ QUERIES = {
             WHERE classification = %s
               {device_filter}
               AND collected_at >= NOW() - INTERVAL '1 hour'
-            GROUP BY srcname, srcip, app, classification
+            GROUP BY device_name, srcname, srcip, app, classification
             ORDER BY event_count DESC
             LIMIT 20
         """,
         "source": """
             SELECT
-                COALESCE(srcname, srcip, '—')         AS source_label,
+                device_name || ': ' || COALESCE(srcname, srcip, '—') AS source_label,
                 COALESCE(app, '—')                    AS detail,
                 COALESCE(classification, 'info')      AS severity,
                 COUNT(*)                              AS event_count,
@@ -322,7 +322,7 @@ QUERIES = {
             WHERE source = %s
               {device_filter}
               AND collected_at >= NOW() - INTERVAL '1 hour'
-            GROUP BY srcname, srcip, app, classification
+            GROUP BY device_name, srcname, srcip, app, classification
             ORDER BY event_count DESC
             LIMIT 20
         """,

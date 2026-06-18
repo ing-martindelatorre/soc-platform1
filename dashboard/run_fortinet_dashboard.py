@@ -443,19 +443,54 @@ def build_html(device_name: str, sections: Dict[str, Dict[str, Any]], errors: Li
     return html
 
 
+def _get_active_device_names() -> list[str]:
+    """Detecta los dispositivos Fortinet activos según las vars FORTI_n_* del .env."""
+    devices = []
+    for n in range(1, 6):
+        url   = os.getenv(f"FORTI_{n}_BASE_URL", "").strip()
+        token = os.getenv(f"FORTI_{n}_API_TOKEN", "").strip()
+        name  = os.getenv(f"FORTI_{n}_DEVICE_NAME", f"fortigate-{n}").strip()
+        if url and token:
+            devices.append(name)
+    if not devices:
+        legacy = os.getenv("FORTI_DEVICE_NAME", "").strip()
+        if legacy:
+            devices.append(legacy)
+    return devices
+
+
 def main():
-    device_name = os.getenv("FORTI_DEVICE_NAME")
+    devices = _get_active_device_names()
+    dash_dir = os.path.dirname(OUTPUT_PATH)
+    generated = []
+
     conn = get_conn()
     try:
-        chosen_device, sections, errors = fetch_latest_sections(conn, device_name)
+        for device_name in devices:
+            try:
+                chosen_device, sections, errors = fetch_latest_sections(conn, device_name)
+                html = build_html(chosen_device, sections, errors)
+
+                safe_name = device_name.lower().replace(" ", "_").replace("-", "_")
+                per_device_path = os.path.join(dash_dir, f"fortinet_dashboard_{safe_name}.html")
+                with open(per_device_path, "w", encoding="utf-8") as f:
+                    f.write(html)
+
+                if not generated:
+                    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+                        f.write(html)
+
+                generated.append(device_name)
+                print(f"[OK] Dashboard generado para {device_name} → {per_device_path}")
+            except Exception as e:
+                print(f"[ERROR] Dispositivo {device_name}: {e}")
     finally:
         conn.close()
 
-    html = build_html(chosen_device, sections, errors)
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        f.write(html)
-
-    print(f"[OK] Dashboard generado en {OUTPUT_PATH}")
+    if not generated:
+        print("[WARN] No se generó ningún dashboard — verifica las variables FORTI_n_* en .env")
+    else:
+        print(f"[OK] {len(generated)} dashboard(s) generados")
 
 
 if __name__ == "__main__":
