@@ -193,6 +193,7 @@ def build_email_html(
     first_seen: str = "",
     last_seen: str = "",
     entities_table: str = "",
+    asset_name: str = "",
 ) -> str:
     soc_url  = os.getenv("SOC_URL", "localhost:8888")
     style    = SEVERITY_STYLES.get(severity.lower(), SEVERITY_STYLES["default"])
@@ -235,6 +236,7 @@ def build_email_html(
         "{{FIRST_SEEN}}":        first_seen or alert_datetime,
         "{{LAST_SEEN}}":         last_seen or alert_datetime,
         "{{ENTITIES_TABLE}}":    entities_table,
+        "{{ASSET_NAME}}":        asset_name or "—",
     }
 
     html = template
@@ -266,7 +268,8 @@ QUERIES = {
                 COUNT(*)                              AS event_count,
                 MIN(created_at)                       AS first_seen,
                 MAX(created_at)                       AS last_seen,
-                COALESCE(MAX(username), '—')          AS extra
+                COALESCE(MAX(username), '—')          AS extra,
+                COALESCE(agent_name, '—')             AS asset_name
             FROM sentinel_incidents
             WHERE LOWER(COALESCE(classification,'')) = LOWER(%s)
               AND created_at >= NOW() - INTERVAL '1 hour'
@@ -282,7 +285,8 @@ QUERIES = {
                 COUNT(*)                              AS event_count,
                 MIN(created_at)                       AS first_seen,
                 MAX(created_at)                       AS last_seen,
-                COALESCE(MAX(username), '—')          AS extra
+                COALESCE(MAX(username), '—')          AS extra,
+                COALESCE(agent_name, '—')             AS asset_name
             FROM sentinel_incidents
             WHERE LOWER(COALESCE(severity,'')) = LOWER(%s)
               AND created_at >= NOW() - INTERVAL '1 hour'
@@ -300,7 +304,8 @@ QUERIES = {
                 COUNT(*)                              AS event_count,
                 MIN(collected_at)                     AS first_seen,
                 MAX(collected_at)                     AS last_seen,
-                COALESCE(MAX(dstcountry), '—')        AS extra
+                COALESCE(MAX(dstcountry), '—')        AS extra,
+                device_name                           AS asset_name
             FROM fortinet_threats
             WHERE classification = %s
               {device_filter}
@@ -317,7 +322,8 @@ QUERIES = {
                 COUNT(*)                              AS event_count,
                 MIN(collected_at)                     AS first_seen,
                 MAX(collected_at)                     AS last_seen,
-                COALESCE(MAX(dstcountry), '—')        AS extra
+                COALESCE(MAX(dstcountry), '—')        AS extra,
+                device_name                           AS asset_name
             FROM fortinet_threats
             WHERE source = %s
               {device_filter}
@@ -336,7 +342,8 @@ QUERIES = {
                 COUNT(*)                              AS event_count,
                 MIN(created_at)                       AS first_seen,
                 MAX(created_at)                       AS last_seen,
-                COALESCE(MAX(issue_id), '—')          AS extra
+                COALESCE(MAX(issue_id), '—')          AS extra,
+                COALESCE(repo_name, '—')              AS asset_name
             FROM snyk_findings
             WHERE LOWER(severity) = LOWER(%s)
               AND created_at >= NOW() - INTERVAL '24 hours'
@@ -354,12 +361,13 @@ QUERIES = {
                 COUNT(*)                              AS event_count,
                 MIN(f.created_at)                     AS first_seen,
                 MAX(f.created_at)                     AS last_seen,
-                COALESCE(MAX(f.category), '—')        AS extra
+                COALESCE(MAX(f.category), '—')        AS extra,
+                COALESCE(a.hostname, a.ip)             AS asset_name
             FROM nmap_findings f
             JOIN nmap_assets a ON f.asset_id = a.id
             WHERE LOWER(f.severity) = LOWER(%s)
               AND f.created_at >= NOW() - INTERVAL '6 hours'
-            GROUP BY a.ip, f.title, f.severity
+            GROUP BY a.ip, a.hostname, f.title, f.severity
             ORDER BY event_count DESC
             LIMIT 20
         """,
@@ -411,6 +419,14 @@ def _build_alert_context(rows: list[dict]) -> dict:
     first_seen = str(min((r["first_seen"] for r in rows if r.get("first_seen")), default="—"))
     last_seen  = str(max((r["last_seen"]  for r in rows if r.get("last_seen")),  default="—"))
 
+    assets = list(dict.fromkeys(
+        str(r.get("asset_name", "—")) for r in rows if r.get("asset_name")
+    ))
+    if len(assets) > 3:
+        asset_name = ", ".join(assets[:3]) + f" (+{len(assets) - 3} más)"
+    else:
+        asset_name = ", ".join(assets) if assets else "—"
+
     return {
         "source_host":    source_host,
         "destination":    top.get("extra", "—"),
@@ -420,6 +436,7 @@ def _build_alert_context(rows: list[dict]) -> dict:
         "unique_sources": unique_sources,
         "first_seen":     first_seen[:19],
         "last_seen":      last_seen[:19],
+        "asset_name":     asset_name,
     }
 
 
@@ -436,12 +453,14 @@ def _generate_entities_table(rows: list[dict]) -> str:
     body = ""
     for r in rows:
         count  = int(r.get("event_count", 1))
+        asset  = str(r.get("asset_name", "—"))
         src    = str(r.get("source_label", "—"))
         detail = str(r.get("detail", "—"))[:60]
         first  = str(r.get("first_seen", "—"))[:16]
         last_  = str(r.get("last_seen",  "—"))[:16]
         body += (
             f"<tr>"
+            f"<td style='{td}'><strong>{asset}</strong></td>"
             f"<td style='{td}'>{src}</td>"
             f"<td style='{td}'>{detail}</td>"
             f"<td style='{tdr}'><strong>{count:,}</strong></td>"
@@ -454,6 +473,7 @@ def _generate_entities_table(rows: list[dict]) -> str:
         f"<div style='margin:20px 0;border:1px solid #e0e6f0;border-radius:10px;overflow:hidden'>"
         f"<table style='width:100%;border-collapse:collapse'>"
         f"<thead><tr>"
+        f"<th style='{th}'>Dispositivo</th>"
         f"<th style='{th}'>Origen</th>"
         f"<th style='{th}'>Detalle</th>"
         f"<th style='{thr}'>Eventos</th>"
@@ -639,6 +659,8 @@ def evaluate_and_send() -> int:
             entities_table = _generate_entities_table(new_rows)
             alert_datetime = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
+            asset_name = ctx.get("asset_name", "")
+
             html = build_email_html(
                 module=module,
                 rule_name=rule["name"],
@@ -653,11 +675,15 @@ def evaluate_and_send() -> int:
                 first_seen=ctx["first_seen"],
                 last_seen=ctx["last_seen"],
                 entities_table=entities_table,
+                asset_name=asset_name,
             )
 
             # ── 4. Enviar email y Slack ────────────────────────────────────────
+            subject = rule["subject"]
+            if asset_name and asset_name != "—":
+                subject = f"{subject} [{asset_name}]"
             recipients = list(rule["recipients"])
-            success    = send_email(recipients, rule["subject"], html)
+            success    = send_email(recipients, subject, html)
             status     = "sent" if success else "failed"
 
             slack_url = os.getenv("SLACK_WEBHOOK_URL", "")
