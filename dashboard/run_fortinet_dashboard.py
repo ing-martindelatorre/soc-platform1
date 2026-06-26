@@ -25,6 +25,24 @@ def get_conn():
     )
 
 
+def fetch_antivirus_events(conn, device_name: str, hours: int = 24) -> List[Dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT virus, filename, dtype, srcip, action, classification,
+                   log_date::text AS log_date, log_time
+            FROM fortinet_threats
+            WHERE source = 'antivirus'
+              AND device_name = %s
+              AND collected_at >= NOW() - INTERVAL %s
+            ORDER BY collected_at DESC
+            LIMIT 50
+            """,
+            (device_name, f"{hours} hours"),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
 def fetch_latest_sections(conn, device_name: Optional[str] = None) -> Tuple[str, Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
     with conn.cursor() as cur:
         if device_name:
@@ -244,7 +262,40 @@ def render_table(title: str, headers: List[str], rows: List[List[str]], max_rows
     )
 
 
-def build_html(device_name: str, sections: Dict[str, Dict[str, Any]], errors: List[Dict[str, Any]]) -> str:
+def _render_antivirus_panel(events: List[Dict[str, Any]]) -> str:
+    if not events:
+        return (
+            "<section class='panel'>"
+            "<h2>Antivirus — Últimas 24 horas</h2>"
+            "<p class='muted'>Sin detecciones de malware en las últimas 24 horas.</p>"
+            "</section>"
+        )
+    rows_html = ""
+    for e in events:
+        cls_color = "#ff4d6d" if e.get("classification") == "blocked" else "#f39c12"
+        rows_html += (
+            f"<tr>"
+            f"<td>{escape(str(e.get('log_date') or ''))}</td>"
+            f"<td>{escape(str(e.get('log_time') or ''))}</td>"
+            f"<td style='color:#ff4d6d;font-weight:700'>{escape(str(e.get('virus') or '—'))}</td>"
+            f"<td style='color:#96a2b4;font-size:12px'>{escape(str(e.get('filename') or '—'))}</td>"
+            f"<td>{escape(str(e.get('srcip') or '—'))}</td>"
+            f"<td>{escape(str(e.get('dtype') or '—'))}</td>"
+            f"<td style='color:{cls_color};font-weight:700'>{escape(str(e.get('classification') or '—'))}</td>"
+            f"</tr>"
+        )
+    return (
+        "<section class='panel'>"
+        "<h2>Antivirus — Últimas 24 horas</h2>"
+        "<div class='table-wrap'>"
+        "<table><thead><tr>"
+        "<th>Fecha</th><th>Hora</th><th>Virus</th><th>Archivo</th><th>Origen</th><th>Tipo</th><th>Estado</th>"
+        f"</tr></thead><tbody>{rows_html}</tbody></table>"
+        "</div></section>"
+    )
+
+
+def build_html(device_name: str, sections: Dict[str, Dict[str, Any]], errors: List[Dict[str, Any]], antivirus_events: Optional[List[Dict[str, Any]]] = None) -> str:
     system_status = scalar_of(sections, "system_status")
     addresses = results_of(sections, "firewall_addresses")
     policies = results_of(sections, "firewall_policies")
@@ -252,6 +303,7 @@ def build_html(device_name: str, sections: Dict[str, Dict[str, Any]], errors: Li
     admins = results_of(sections, "system_admins")
     routes = results_of(sections, "router_static")
     findings = compute_findings(sections, errors)
+    av_events = antivirus_events or []
 
     serial = safe_get(system_status, ["serial"]) or safe_get(system_status, ["results", "serial"]) or safe_get(system_status, ["serial-number"])
     version = safe_get(system_status, ["version"]) or safe_get(system_status, ["results", "version"]) or scalar_of(sections, "firewall_addresses").get("version", "")
@@ -264,6 +316,9 @@ def build_html(device_name: str, sections: Dict[str, Dict[str, Any]], errors: Li
         ]
     )
 
+    av_blocked = sum(1 for e in av_events if e.get("classification") == "blocked")
+    av_detected = sum(1 for e in av_events if e.get("classification") == "detected")
+
     cards = [
         ("Dispositivo", hostname),
         ("Serial", serial or "N/D"),
@@ -275,14 +330,23 @@ def build_html(device_name: str, sections: Dict[str, Dict[str, Any]], errors: Li
         ("Interfaces", str(len(interfaces))),
         ("Routes", str(len(routes))),
         ("Admins", str(len(admins))),
+        ("Virus 24h", str(len(av_events))),
         ("Findings", str(len(findings))),
-        ("Errors", str(len(errors))),
     ]
 
     cards_html = "".join(
         f"<div class='card'><div class='label'>{escape(k)}</div><div class='value'>{escape(v)}</div></div>"
         for k, v in cards
     )
+
+    if av_events:
+        top_viruses = list({e["virus"]: e for e in av_events if e.get("virus")}.values())[:3]
+        virus_names = ", ".join(e["virus"] for e in top_viruses if e.get("virus"))
+        findings.insert(0, {
+            "severity": "alta",
+            "title": f"Antivirus: {av_blocked} bloqueados / {av_detected} detectados (24h)",
+            "detail": f"Amenazas: {virus_names or 'ver tabla'} — revisa el panel de antivirus abajo.",
+        })
 
     finding_html = "".join(
         f"<div class='finding {escape(item['severity'])}'>"
@@ -430,6 +494,7 @@ def build_html(device_name: str, sections: Dict[str, Dict[str, Any]], errors: Li
       </div>
     </section>
 
+    {_render_antivirus_panel(av_events)}
     {render_table('Top políticas de firewall', ['ID', 'Nombre', 'Src Intf', 'Dst Intf', 'Src Addr', 'Dst Addr', 'Service', 'Action', 'Status'], policies_rows, 20)}
     {render_table('Interfaces', ['Nombre', 'IP', 'Rol', 'Estado', 'Allowaccess', 'Alias'], interfaces_rows, 20)}
     {render_table('Objetos de dirección', ['Nombre', 'Tipo', 'Subnet / Rango / FQDN', 'Associated Interface', 'Allow Routing', 'Comentario'], addresses_rows, 20)}
@@ -469,7 +534,8 @@ def main():
         for device_name in devices:
             try:
                 chosen_device, sections, errors = fetch_latest_sections(conn, device_name)
-                html = build_html(chosen_device, sections, errors)
+                av_events = fetch_antivirus_events(conn, chosen_device, hours=24)
+                html = build_html(chosen_device, sections, errors, antivirus_events=av_events)
 
                 safe_name = device_name.lower().replace(" ", "_").replace("-", "_")
                 per_device_path = os.path.join(dash_dir, f"fortinet_dashboard_{safe_name}.html")
