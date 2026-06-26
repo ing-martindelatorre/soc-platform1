@@ -33,7 +33,6 @@ FORTINET_THREAT_ENDPOINTS = {
     "event_vpn":       "/api/v2/log/memory/event/vpn",
     "ips":             "/api/v2/log/memory/ips",
     "virus":           "/api/v2/log/memory/virus",
-    "virus_disk":      "/api/v2/log/disk/virus",
 }
 
 # Número máximo de dispositivos soportados
