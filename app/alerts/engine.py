@@ -161,6 +161,13 @@ ACTION_ITEMS = {
         "Verifica si el equipo origen está comprometido",
         "Considera bloquear la conexión si es maliciosa",
     ],
+    "fortinet_antivirus": [
+        "Aísla el equipo origen si la infección no fue bloqueada por el Fortinet",
+        "Verifica el archivo detectado y elimínalo del equipo afectado",
+        "Comprueba si otros equipos de la red descargaron el mismo archivo",
+        "Revisa el tab Antivirus en el dashboard de Fortinet Threats para el historial completo",
+        "Actualiza las firmas de antivirus en el FortiGate si el malware es nuevo",
+    ],
     "snyk": [
         "Revisa el repositorio afectado en el dashboard de Snyk",
         "Actualiza la dependencia vulnerable si hay versión disponible",
@@ -194,11 +201,12 @@ def build_email_html(
     last_seen: str = "",
     entities_table: str = "",
     asset_name: str = "",
+    action_key: str = "",
 ) -> str:
     soc_url  = os.getenv("SOC_URL", "localhost:8888")
     style    = SEVERITY_STYLES.get(severity.lower(), SEVERITY_STYLES["default"])
     mod_name = MODULE_NAMES.get(module, module.capitalize())
-    actions  = ACTION_ITEMS.get(module, ACTION_ITEMS["sentinel"])
+    actions  = ACTION_ITEMS.get(action_key) or ACTION_ITEMS.get(module, ACTION_ITEMS["sentinel"])
     action_html = "\n".join(f"<li>{a}</li>" for a in actions)
 
     try:
@@ -329,6 +337,24 @@ QUERIES = {
               {device_filter}
               AND collected_at >= NOW() - INTERVAL '1 hour'
             GROUP BY device_name, srcname, srcip, app, classification
+            ORDER BY event_count DESC
+            LIMIT 20
+        """,
+        "antivirus": """
+            SELECT
+                device_name || ': ' || COALESCE(srcname, srcip, '—') AS source_label,
+                COALESCE(virus, logdesc, '—')         AS detail,
+                classification                        AS severity,
+                COUNT(*)                              AS event_count,
+                MIN(collected_at)                     AS first_seen,
+                MAX(collected_at)                     AS last_seen,
+                COALESCE(MAX(filename), '—')          AS extra,
+                device_name                           AS asset_name
+            FROM fortinet_threats
+            WHERE source = 'antivirus'
+              {device_filter}
+              AND collected_at >= NOW() - INTERVAL '1 hour'
+            GROUP BY device_name, srcname, srcip, virus, logdesc, classification
             ORDER BY event_count DESC
             LIMIT 20
         """,
@@ -608,7 +634,15 @@ def evaluate_and_send() -> int:
 
             device_filter = rule.get("device_filter") or ""
             if module == "fortinet":
-                if device_filter:
+                if field == "antivirus":
+                    # source fijo en la query, no se pasa condition_value como parámetro
+                    if device_filter:
+                        query = query.replace("{device_filter}", "AND device_name = %s")
+                        params = (device_filter,)
+                    else:
+                        query = query.replace("{device_filter}", "")
+                        params = ()
+                elif device_filter:
                     query = query.replace("{device_filter}", "AND device_name = %s")
                     params = (value, device_filter)
                 else:
@@ -676,6 +710,7 @@ def evaluate_and_send() -> int:
                 last_seen=ctx["last_seen"],
                 entities_table=entities_table,
                 asset_name=asset_name,
+                action_key=f"{module}_{field}",
             )
 
             # ── 4. Enviar email y Slack ────────────────────────────────────────
