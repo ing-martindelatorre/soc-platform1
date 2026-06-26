@@ -277,8 +277,16 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
         "top_srcip":    _top_counter(webfilter_records, "srcip", 10),
     }
 
-    # ── Antivirus ────────────────────────────────────────────────────────────
-    virus_records = _results(sections.get("virus", {}))
+    # ── Antivirus (memoria + disco, deduplicado por date+time+srcip+virus) ──
+    virus_records_mem  = _results(sections.get("virus", {}))
+    virus_records_disk = _results(sections.get("virus_disk", {}))
+    seen_keys: set = set()
+    virus_records: List[Dict[str, Any]] = []
+    for entry in virus_records_mem + virus_records_disk:
+        key = (entry.get("date"), entry.get("time"), entry.get("srcip"), entry.get("virus"))
+        if key not in seen_keys:
+            seen_keys.add(key)
+            virus_records.append(entry)
     virus_classified = []
     for entry in virus_records:
         action = (entry.get("action") or "").lower()
