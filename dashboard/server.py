@@ -511,6 +511,18 @@ def build_fortinet_threats_data(hours: int = 24, device_name: str | None = None)
             """, df_param)
             vpn_records = [dict(r) for r in cur.fetchall()]
 
+            cur.execute(f"""
+                SELECT srcip, srcname, dstip, service, action, classification,
+                       virus, filename, dtype, url, policyname,
+                       log_date::text AS log_date, log_time
+                FROM fortinet_threats
+                WHERE source='antivirus'
+                  AND collected_at >= NOW() - INTERVAL '{interval}'
+                  {df_sql}
+                ORDER BY collected_at DESC LIMIT 200
+            """, df_param)
+            antivirus_records = [dict(r) for r in cur.fetchall()]
+
     # Enriquecer tráfico con reputación de IPs y descartar infraestructura conocida
     if _IP_INTEL_AVAILABLE:
         traffic_records = enrich_traffic_records(traffic_records, filter_known=True)
@@ -550,6 +562,7 @@ def build_fortinet_threats_data(hours: int = 24, device_name: str | None = None)
     tc = counts.get("traffic", {})
     ec = counts.get("event", {})
     wc = counts.get("webfilter", {})
+    avc = counts.get("antivirus", {})
 
     return {
         "generated_at": now_str(),
@@ -566,6 +579,8 @@ def build_fortinet_threats_data(hours: int = 24, device_name: str | None = None)
             "blocked_webfilter":  wc.get("blocked", 0),
             "total_ips":          sum(counts.get("ips", {}).values()),
             "total_vpn":          sum(counts.get("vpn", {}).values()),
+            "total_virus":        sum(avc.values()),
+            "blocked_virus":      avc.get("blocked", 0),
         },
         "traffic": {
             "records":   traffic_records,
@@ -610,6 +625,17 @@ def build_fortinet_threats_data(hours: int = 24, device_name: str | None = None)
         "vpn": {
             "records": vpn_records,
             "summary": {"total": len(vpn_records)},
+        },
+        "antivirus": {
+            "records": antivirus_records,
+            "summary": {
+                "total":        sum(avc.values()),
+                "blocked":      avc.get("blocked", 0),
+                "detected":     avc.get("detected", 0),
+                "top_virus":    top_counter(antivirus_records, "virus"),
+                "top_srcip":    top_counter(antivirus_records, "srcip"),
+                "top_filename": top_counter(antivirus_records, "filename"),
+            },
         },
     }
 

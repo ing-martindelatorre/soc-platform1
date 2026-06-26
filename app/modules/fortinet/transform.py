@@ -277,6 +277,43 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
         "top_srcip":    _top_counter(webfilter_records, "srcip", 10),
     }
 
+    # ── Antivirus ────────────────────────────────────────────────────────────
+    virus_records = _results(sections.get("virus", {}))
+    virus_classified = []
+    for entry in virus_records:
+        action = (entry.get("action") or "").lower()
+        classification = "blocked" if action in ("blocked", "block", "deny") else "detected"
+        virus_classified.append({
+            "date":         entry.get("date"),
+            "time":         entry.get("time"),
+            "srcip":        entry.get("srcip"),
+            "srcname":      entry.get("srcname"),
+            "dstip":        entry.get("dstip"),
+            "dstport":      entry.get("dstport"),
+            "service":      entry.get("service"),
+            "action":       entry.get("action"),
+            "virus":        entry.get("virus"),
+            "filename":     entry.get("filename"),
+            "profile":      entry.get("profile"),
+            "dtype":        entry.get("dtype"),
+            "url":          entry.get("url"),
+            "policyname":   entry.get("policyname"),
+            "level":        entry.get("level"),
+            "msg":          entry.get("msg"),
+            "logdesc":      entry.get("logdesc"),
+            "classification": classification,
+        })
+
+    virus_summary = {
+        "total":        len(virus_records),
+        "blocked":      sum(1 for v in virus_classified if v["classification"] == "blocked"),
+        "detected":     sum(1 for v in virus_classified if v["classification"] == "detected"),
+        "top_virus":    _top_counter(virus_records, "virus", 10),
+        "top_srcip":    _top_counter(virus_records, "srcip", 10),
+        "top_filename": _top_counter(virus_records, "filename", 10),
+        "top_dtype":    _top_counter(virus_records, "dtype", 5),
+    }
+
     # ── IPS ──────────────────────────────────────────────────────────────────
     ips_records = _results(sections.get("ips", {}))
     ips_summary = {
@@ -309,6 +346,8 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
             "blocked_webfilter":    webfilter_summary["blocked"],
             "total_ips":            len(ips_records),
             "total_vpn":            len(vpn_records),
+            "total_virus":          len(virus_records),
+            "blocked_virus":        virus_summary["blocked"],
             "errors_count":         len(data.get("errors", [])),
         },
         "traffic": {
@@ -333,6 +372,10 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
         "vpn": {
             "summary": vpn_summary,
             "records": vpn_records,
+        },
+        "antivirus": {
+            "summary": virus_summary,
+            "records": virus_classified,
         },
         "errors": data.get("errors", []),
     }

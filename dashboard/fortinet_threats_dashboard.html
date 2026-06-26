@@ -247,6 +247,7 @@
       <div class="tab" onclick="switchTab('webfilter')">🌐 Webfilter</div>
       <div class="tab" onclick="switchTab('events')">⚙️ Eventos</div>
       <div class="tab" onclick="switchTab('vpn')">🔒 VPN</div>
+      <div class="tab" onclick="switchTab('antivirus')">🛡️ Antivirus</div>
     </div>
 
     <div class="tab-content active" id="tab-traffic">
@@ -281,6 +282,15 @@
         <table>
           <thead><tr><th>Hora</th><th>Origen</th><th>Acción</th><th>Nivel</th><th>Mensaje</th></tr></thead>
           <tbody id="vpn-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-antivirus">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Hora</th><th>Origen</th><th>Destino</th><th>Virus</th><th>Archivo</th><th>Tipo</th><th>Acción</th><th>Estado</th></tr></thead>
+          <tbody id="antivirus-body"></tbody>
         </table>
       </div>
     </div>
@@ -344,7 +354,7 @@ function riskBadge(r) {
 }
 
 function switchTab(name) {
-  const names = ['traffic','webfilter','events','vpn'];
+  const names = ['traffic','webfilter','events','vpn','antivirus'];
   document.querySelectorAll('.tab').forEach((t,i) => t.className = 'tab' + (names[i]===name?' active':''));
   document.querySelectorAll('.tab-content').forEach(c => c.className = 'tab-content');
   const el = document.getElementById('tab-'+name);
@@ -477,6 +487,7 @@ function render(data) {
     { label: 'Bloqueado',      value: s.blocked_traffic    || 0, cls: (s.blocked_traffic||0) > 0 ? 'red' : 'green' },
     { label: 'Webfilter block',value: s.blocked_webfilter  || 0, cls: (s.blocked_webfilter||0) > 0 ? 'red' : '' },
     { label: 'IPS alerts',     value: s.total_ips          || 0, cls: (s.total_ips||0) > 0 ? 'red' : 'green' },
+    { label: 'Virus bloqueados',value: s.blocked_virus     || 0, cls: (s.blocked_virus||0) > 0 ? 'red' : 'green' },
   ];
 
   document.getElementById('kpis').innerHTML = kpis.map(k => `
@@ -560,6 +571,20 @@ function render(data) {
       <td>${esc(r.time||'—')}</td><td>${esc(r.srcip||'—')}</td>
       <td>${esc(r.action||'—')}</td><td>${esc(r.level||'—')}</td>
       <td style="color:var(--muted);font-size:10px">${esc((r.msg||'—').substring(0,80))}</td>
+    </tr>`).join('');
+
+  // Tabla Antivirus
+  const avRecords = (data.antivirus?.records||[]).slice(0,100);
+  document.getElementById('antivirus-body').innerHTML = !avRecords.length ? '<tr><td colspan="8" class="empty">Sin detecciones de malware en este período</td></tr>' :
+    avRecords.map(r => `<tr>
+      <td>${esc(r.log_time||'—')}</td>
+      <td>${esc(r.srcname||r.srcip||'—')}</td>
+      <td>${esc(r.dstip||'—')}</td>
+      <td style="color:#ff4d6d;font-weight:700">${esc(r.virus||'—')}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${esc(r.filename||'—')}</td>
+      <td>${esc(r.dtype||'—')}</td>
+      <td>${esc(r.action||'—')}</td>
+      <td>${clsBadge(r.classification)}</td>
     </tr>`).join('');
 }
 

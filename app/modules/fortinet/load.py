@@ -159,6 +159,7 @@ def _insert_threats_batch(cur, device_name: str, source: str, records: List[Dict
                     srcip, srcname, dstip, dstport, dstcountry, service,
                     app, apprisk, hostname, url, catdesc, policyname,
                     sentbyte, rcvdbyte,
+                    virus, filename, dtype,
                     payload
                 ) VALUES (
                     %s, %s, %s,
@@ -166,6 +167,7 @@ def _insert_threats_batch(cur, device_name: str, source: str, records: List[Dict
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s,
+                    %s, %s, %s,
                     %s::jsonb
                 )
                 """,
@@ -193,6 +195,9 @@ def _insert_threats_batch(cur, device_name: str, source: str, records: List[Dict
                     rec.get("policyname"),
                     _to_int(rec.get("sentbyte")),
                     _to_int(rec.get("rcvdbyte")),
+                    rec.get("virus"),
+                    rec.get("filename"),
+                    rec.get("dtype"),
                     json.dumps(rec),
                 ),
             )
@@ -211,6 +216,7 @@ def load_threats(data: Dict[str, Any]) -> None:
     webfilter_records = data.get("webfilter", {}).get("records", [])
     ips_records       = data.get("ips",       {}).get("records", [])
     vpn_records       = data.get("vpn",       {}).get("records", [])
+    virus_records     = data.get("antivirus", {}).get("records", [])
 
     conn = get_conn()
     try:
@@ -221,6 +227,7 @@ def load_threats(data: Dict[str, Any]) -> None:
                 _insert_threats_batch(cur, device_name, "webfilter", webfilter_records)
                 _insert_threats_batch(cur, device_name, "ips",       ips_records)
                 _insert_threats_batch(cur, device_name, "vpn",       vpn_records)
+                _insert_threats_batch(cur, device_name, "antivirus", virus_records)
 
                 for err in errors:
                     cur.execute(
