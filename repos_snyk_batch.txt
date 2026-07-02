@@ -5,9 +5,7 @@
 /home/zidane/soc-platform1/data/repos/security
 /home/zidane/soc-platform1/data/repos/ventaRutaRNDev
 /home/zidane/soc-platform1/data/repos/franquicias
-/home/zidane/soc-platform1/data/repos/logistica
 /home/zidane/soc-platform1/data/repos/Portal_VentasUW
-/home/zidane/soc-platform1/data/repos/ubicacionesCH
 /home/zidane/soc-platform1/data/repos/Portal-Web-WMS
 /home/zidane/soc-platform1/data/repos/OperacionesAPICore
 /home/zidane/soc-platform1/data/repos/almacen_sistemas_be
@@ -15,6 +13,5 @@
 /home/zidane/soc-platform1/data/repos/logistica_traslados_be
 /home/zidane/soc-platform1/data/repos/ReporteFamiliaGroup
 /home/zidane/soc-platform1/data/repos/APICrystalReports
-/home/zidane/soc-platform1/data/repos/franquiciasKotlin
 /home/zidane/soc-platform1/data/repos/SAPAlmacenAPP
 /home/zidane/soc-platform1/data/repos/SAPOperacionesMovil
