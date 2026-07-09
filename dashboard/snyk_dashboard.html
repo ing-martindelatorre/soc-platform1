@@ -267,10 +267,128 @@
       padding: 20px 0 4px;
     }
 
+    /* VULN GROUPS (por aplicación) */
+    .vuln-group {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+
+    .vuln-group summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255,255,255,0.02);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+
+    .vuln-group summary::-webkit-details-marker { display: none; }
+
+    .vuln-group summary .app-name { color: #fff; font-weight: 700; }
+
+    .vuln-group summary .app-meta { color: var(--muted); font-size: 11px; }
+
+    .vuln-row {
+      display: grid;
+      grid-template-columns: 90px 1fr 160px 70px 140px;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 14px;
+      border-top: 1px solid rgba(24,36,54,0.6);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+
+    .vuln-row.dismissed { opacity: 0.45; }
+
+    .vuln-row .v-title { color: var(--text); }
+    .vuln-row .v-pkg { color: var(--muted); font-size: 11px; }
+    .vuln-row .v-reason { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+    .btn {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .btn-dismiss   { border-color: rgba(255,77,109,0.4); color: var(--red); }
+    .btn-dismiss:hover   { background: rgba(255,77,109,0.1); }
+    .btn-reactivate { border-color: rgba(0,230,118,0.4); color: var(--green); }
+    .btn-reactivate:hover { background: rgba(0,230,118,0.1); }
+
+    /* MODAL */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.open { display: flex; }
+
+    .modal-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px;
+      width: 420px;
+      max-width: 90vw;
+    }
+
+    .modal-box h3 {
+      font-size: 15px;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+
+    .modal-box p {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    .modal-box textarea {
+      width: 100%;
+      min-height: 80px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      padding: 10px;
+      resize: vertical;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
     @media (max-width: 900px) {
       .kpi-grid   { grid-template-columns: repeat(2, 1fr); }
       .two-col    { grid-template-columns: 1fr; }
       .three-col  { grid-template-columns: 1fr; }
+      .vuln-row   { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -330,7 +448,25 @@
     </div>
   </div>
 
+  <!-- Vulnerabilidades por aplicación (con descartar/reactivar) -->
+  <div class="panel">
+    <div class="panel-title">Vulnerabilidades por aplicación</div>
+    <div id="vuln-by-project"></div>
+  </div>
+
   <div class="foot">SOC Platform · Snyk Dashboard · generado automáticamente desde PostgreSQL</div>
+</div>
+
+<div class="modal-overlay" id="dismiss-modal">
+  <div class="modal-box">
+    <h3>Marcar como revisada</h3>
+    <p id="dismiss-modal-subtitle"></p>
+    <textarea id="dismiss-reason" placeholder="Motivo (ej. sin fix disponible, no aplica a este entorno)..."></textarea>
+    <div class="modal-actions">
+      <button class="btn" id="dismiss-cancel">Cancelar</button>
+      <button class="btn btn-dismiss" id="dismiss-confirm">Descartar</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -413,6 +549,7 @@ function render(data) {
   const medium   = sev.medium   || 0;
   const low      = sev.low      || 0;
   const repos    = (data.top_projects || data.project_summary || []).length;
+  const dismissed = data.total_dismissed || 0;
 
   // KPIs
   const kpis = [
@@ -424,6 +561,7 @@ function render(data) {
     { label: 'Repositorios',    value: repos,    cls: 'purple' },
     { label: 'SCA issues',      value: (data.scan_type || {}).sca || 0, cls: 'blue' },
     { label: 'Code issues',     value: (data.scan_type || {}).code || 0, cls: '' },
+    { label: 'Revisadas',       value: dismissed, cls: 'green' },
   ];
 
   document.getElementById('kpis').innerHTML = kpis.map(k => `
@@ -479,7 +617,122 @@ function render(data) {
       `;
     }).join('');
   }
+
+  renderVulnByProject(data.vulnerabilities_by_project || []);
 }
+
+function renderVulnByProject(groups) {
+  const el = document.getElementById('vuln-by-project');
+  if (!groups.length) {
+    el.innerHTML = '<span class="empty">Sin datos</span>';
+    return;
+  }
+
+  el.innerHTML = groups.map(g => {
+    const items = g.items || [];
+    const activeCount = items.filter(i => !i.dismissed).length;
+    const dismissedCount = items.length - activeCount;
+
+    const rows = items.map(i => {
+      const cls = i.dismissed ? 'vuln-row dismissed' : 'vuln-row';
+      const pkgBits = [i.package_name, i.version].filter(Boolean).join(' @ ');
+      const action = i.dismissed
+        ? `<button class="btn btn-reactivate" data-action="reactivate" data-repo="${esc(i.repo_name)}" data-issue="${esc(i.issue_id)}">Reactivar</button>`
+        : `<button class="btn btn-dismiss" data-action="dismiss" data-repo="${esc(i.repo_name)}" data-issue="${esc(i.issue_id)}" data-title="${esc(i.title)}">Descartar</button>`;
+      const reasonLine = i.dismissed && i.reason
+        ? `<div class="v-reason">Motivo: ${esc(i.reason)}${i.dismissed_at ? ' · ' + esc(i.dismissed_at.slice(0, 10)) : ''}</div>`
+        : '';
+
+      return `
+        <div class="${cls}">
+          <span class="sev ${sevClass(i.severity)}">${esc(i.severity)}</span>
+          <div>
+            <div class="v-title">${esc(i.title)}</div>
+            ${pkgBits ? `<div class="v-pkg">${esc(pkgBits)}</div>` : ''}
+            ${reasonLine}
+          </div>
+          <span class="v-pkg">${esc(i.cve || '')}</span>
+          <span>${i.occurrences}</span>
+          <span>${action}</span>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <details class="vuln-group">
+        <summary>
+          <span class="app-name">${esc(g.project_name)}</span>
+          <span class="app-meta">${activeCount} activa(s) · ${dismissedCount} revisada(s)</span>
+        </summary>
+        ${rows}
+      </details>
+    `;
+  }).join('');
+}
+
+// --- Modal de descartar ---
+const modal          = document.getElementById('dismiss-modal');
+const modalSubtitle   = document.getElementById('dismiss-modal-subtitle');
+const reasonInput     = document.getElementById('dismiss-reason');
+let pendingDismiss     = null;
+
+function openDismissModal(repo, issue, title) {
+  pendingDismiss = { repo, issue };
+  modalSubtitle.textContent = `${repo} — ${title}`;
+  reasonInput.value = '';
+  modal.classList.add('open');
+  reasonInput.focus();
+}
+
+function closeDismissModal() {
+  modal.classList.remove('open');
+  pendingDismiss = null;
+}
+
+document.getElementById('dismiss-cancel').addEventListener('click', closeDismissModal);
+
+document.getElementById('dismiss-confirm').addEventListener('click', async () => {
+  if (!pendingDismiss) return;
+  const reason = reasonInput.value.trim();
+  if (!reason) {
+    reasonInput.focus();
+    return;
+  }
+  await postDismissal({ action: 'dismiss', repo_name: pendingDismiss.repo, issue_id: pendingDismiss.issue, reason });
+  closeDismissModal();
+});
+
+async function postDismissal(payload) {
+  try {
+    const res = await fetch('/api/dismissals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      alert(body.error || 'No se pudo actualizar la vulnerabilidad');
+      return;
+    }
+    loadData();
+  } catch (e) {
+    alert('Error de red al actualizar la vulnerabilidad');
+  }
+}
+
+document.getElementById('vuln-by-project').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button[data-action]');
+  if (!btn) return;
+  const repo = btn.dataset.repo;
+  const issue = btn.dataset.issue;
+  if (btn.dataset.action === 'dismiss') {
+    openDismissModal(repo, issue, btn.dataset.title || '');
+  } else if (btn.dataset.action === 'reactivate') {
+    if (confirm(`¿Reactivar esta vulnerabilidad para ${repo}?`)) {
+      postDismissal({ action: 'reactivate', repo_name: repo, issue_id: issue });
+    }
+  }
+});
 
 loadData();
 setInterval(loadData, REFRESH_MS);

@@ -1158,6 +1158,37 @@ class SOCHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
 
+        elif path == "/api/dismissals":
+            body      = self._read_body()
+            action    = str(body.get("action", "")).strip().lower()
+            repo_name = str(body.get("repo_name", "")).strip()
+            issue_id  = str(body.get("issue_id", "")).strip()
+
+            if not repo_name or not issue_id or action not in ("dismiss", "reactivate"):
+                self._send_json({"ok": False, "error": "Faltan repo_name, issue_id o action inválida"}, 400)
+                return
+
+            try:
+                from dashboard.run_snyk_dashboard import (
+                    set_dismissal as snyk_set_dismissal,
+                    clear_dismissal as snyk_clear_dismissal,
+                    build_dashboard_data as snyk_build,
+                )
+                if action == "dismiss":
+                    reason = str(body.get("reason", "")).strip()
+                    if not reason:
+                        self._send_json({"ok": False, "error": "El motivo es obligatorio para descartar"}, 400)
+                        return
+                    dismissed_by = str(body.get("dismissed_by", "")).strip() or None
+                    snyk_set_dismissal(repo_name, issue_id, reason, dismissed_by)
+                else:
+                    snyk_clear_dismissal(repo_name, issue_id)
+
+                snyk_build()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
         elif path == "/api/config/test-smtp":
             try:
                 sys.path.insert(0, str(BASE_DIR.parent))

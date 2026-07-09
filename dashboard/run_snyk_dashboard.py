@@ -16,6 +16,17 @@ DB_NAME = os.getenv("DB_NAME")
 
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "warning", "note", "error"]
 
+# hallazgos con estas combinaciones (repo_name, issue_id) marcadas como
+# is_dismissed=TRUE se excluyen de las vistas/KPIs activos del dashboard
+NOT_DISMISSED_FRAGMENT = """
+    NOT EXISTS (
+        SELECT 1 FROM snyk_dismissals sd
+        WHERE sd.repo_name = snyk_findings.repo_name
+          AND sd.issue_id = snyk_findings.issue_id
+          AND sd.is_dismissed = TRUE
+    )
+"""
+
 
 def get_connection():
     return psycopg2.connect(
@@ -25,6 +36,90 @@ def get_connection():
         password=DB_PASSWORD,
         dbname=DB_NAME
     )
+
+
+def ensure_dismissals_table():
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS snyk_dismissals (
+                id BIGSERIAL PRIMARY KEY,
+                repo_name TEXT NOT NULL,
+                issue_id TEXT NOT NULL,
+                is_dismissed BOOLEAN NOT NULL DEFAULT TRUE,
+                reason TEXT NOT NULL DEFAULT '',
+                dismissed_by TEXT,
+                dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_snyk_dismissals_repo_issue
+                ON snyk_dismissals (repo_name, issue_id);
+        """)
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
+def set_dismissal(repo_name: str, issue_id: str, reason: str, dismissed_by: str | None) -> None:
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO snyk_dismissals (repo_name, issue_id, is_dismissed, reason, dismissed_by, dismissed_at, updated_at)
+            VALUES (%s, %s, TRUE, %s, %s, NOW(), NOW())
+            ON CONFLICT (repo_name, issue_id) DO UPDATE SET
+                is_dismissed = TRUE,
+                reason = EXCLUDED.reason,
+                dismissed_by = EXCLUDED.dismissed_by,
+                dismissed_at = NOW(),
+                updated_at = NOW()
+        """, (repo_name, issue_id, reason, dismissed_by))
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
+def clear_dismissal(repo_name: str, issue_id: str) -> None:
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE snyk_dismissals
+            SET is_dismissed = FALSE, updated_at = NOW()
+            WHERE repo_name = %s AND issue_id = %s
+        """, (repo_name, issue_id))
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
+def get_dismissals() -> dict:
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT repo_name, issue_id, is_dismissed, reason, dismissed_by, dismissed_at
+            FROM snyk_dismissals
+        """)
+        result = {}
+        for repo_name, issue_id, is_dismissed, reason, dismissed_by, dismissed_at in cur.fetchall():
+            key = (repo_name, issue_id)
+            result[key] = {
+                "is_dismissed": bool(is_dismissed),
+                "reason": reason or "",
+                "dismissed_by": dismissed_by,
+                "dismissed_at": dismissed_at.isoformat() if dismissed_at else None,
+            }
+        cur.close()
+        return result
+    finally:
+        conn.close()
 
 
 def ordered_severity_dict(raw_map):
@@ -95,14 +190,21 @@ def build_dashboard_data():
     severity_sql = sql_ident(severity_field)
     scan_type_sql = sql_ident(scan_type_field)
 
-    # total findings
-    cur.execute("SELECT COUNT(*) FROM snyk_findings;")
+    # total findings activos (excluye combinaciones repo+issue descartadas)
+    cur.execute(f"""
+        SELECT COUNT(*) FROM snyk_findings WHERE {NOT_DISMISSED_FRAGMENT};
+    """)
     total_findings = int(cur.fetchone()[0] or 0)
+
+    # total de vulnerabilidades descartadas (grupos repo+issue, no filas individuales)
+    cur.execute("SELECT COUNT(*) FROM snyk_dismissals WHERE is_dismissed = TRUE;")
+    total_dismissed = int(cur.fetchone()[0] or 0)
 
     # severity global
     cur.execute(f"""
         SELECT COALESCE(LOWER({severity_sql}), 'unknown') AS severity, COUNT(*) AS total
         FROM snyk_findings
+        WHERE {NOT_DISMISSED_FRAGMENT}
         GROUP BY COALESCE(LOWER({severity_sql}), 'unknown');
     """)
     severity_raw = rows_to_dict(cur.fetchall())
@@ -112,6 +214,7 @@ def build_dashboard_data():
     cur.execute(f"""
         SELECT COALESCE(LOWER({scan_type_sql}), 'unknown') AS scan_type, COUNT(*) AS total
         FROM snyk_findings
+        WHERE {NOT_DISMISSED_FRAGMENT}
         GROUP BY COALESCE(LOWER({scan_type_sql}), 'unknown')
         ORDER BY total DESC;
     """)
@@ -121,7 +224,7 @@ def build_dashboard_data():
     cur.execute(f"""
         SELECT COALESCE(LOWER({severity_sql}), 'unknown') AS severity, COUNT(*) AS total
         FROM snyk_findings
-        WHERE LOWER({scan_type_sql}) = 'sca'
+        WHERE LOWER({scan_type_sql}) = 'sca' AND {NOT_DISMISSED_FRAGMENT}
         GROUP BY COALESCE(LOWER({severity_sql}), 'unknown');
     """)
     sca_raw = rows_to_dict(cur.fetchall())
@@ -131,17 +234,18 @@ def build_dashboard_data():
     cur.execute(f"""
         SELECT COALESCE(LOWER({severity_sql}), 'unknown') AS severity, COUNT(*) AS total
         FROM snyk_findings
-        WHERE LOWER({scan_type_sql}) = 'code'
+        WHERE LOWER({scan_type_sql}) = 'code' AND {NOT_DISMISSED_FRAGMENT}
         GROUP BY COALESCE(LOWER({severity_sql}), 'unknown');
     """)
     code_raw = rows_to_dict(cur.fetchall())
     code_severity = ordered_severity_dict(code_raw)
 
-    # top proyectos/repos
+    # top proyectos/repos (solo activos)
     cur.execute(f"""
         SELECT COALESCE(NULLIF(TRIM({display_project_sql}), ''), 'unknown') AS project_display,
                COUNT(*) AS total
         FROM snyk_findings
+        WHERE {NOT_DISMISSED_FRAGMENT}
         GROUP BY COALESCE(NULLIF(TRIM({display_project_sql}), ''), 'unknown')
         ORDER BY total DESC
         LIMIT 15;
@@ -151,7 +255,7 @@ def build_dashboard_data():
         for name, total in cur.fetchall()
     ]
 
-    # tabla por proyecto con severidades
+    # tabla por proyecto con severidades (solo activos)
     cur.execute(f"""
         SELECT
             COALESCE(NULLIF(TRIM({display_project_sql}), ''), 'unknown') AS project_display,
@@ -164,6 +268,7 @@ def build_dashboard_data():
             SUM(CASE WHEN LOWER({severity_sql}) = 'note' THEN 1 ELSE 0 END) AS note,
             SUM(CASE WHEN LOWER({severity_sql}) = 'error' THEN 1 ELSE 0 END) AS error
         FROM snyk_findings
+        WHERE {NOT_DISMISSED_FRAGMENT}
         GROUP BY COALESCE(NULLIF(TRIM({display_project_sql}), ''), 'unknown')
         ORDER BY total DESC
         LIMIT 50;
@@ -182,7 +287,7 @@ def build_dashboard_data():
             "error": int(row[8] or 0),
         })
 
-    # detalle de vulnerabilidades por proyecto
+    # detalle de vulnerabilidades por proyecto (activas, para el bloque "top vulnerabilidades")
     project_vulns = []
     if vuln_title_field or vuln_id_field:
         vuln_title_sql = sql_ident(vuln_title_field) if vuln_title_field else None
@@ -226,6 +331,7 @@ def build_dashboard_data():
                         ORDER BY COUNT(*) DESC
                     ) AS rn
                 FROM snyk_findings
+                WHERE {NOT_DISMISSED_FRAGMENT}
                 GROUP BY
                     COALESCE(NULLIF(TRIM({display_project_sql}), ''), 'unknown'),
                     {vuln_display_expr},
@@ -242,9 +348,69 @@ def build_dashboard_data():
                 "total": int(row[3]),
             })
 
+    # detalle completo agrupado por aplicación + issue_id (activas y descartadas),
+    # es la fuente para poder marcar/reactivar desde el dashboard
+    dismissals = get_dismissals()
+
+    vuln_title_sql = sql_ident(vuln_title_field) if vuln_title_field else None
+    title_expr = f"COALESCE(NULLIF(TRIM({vuln_title_sql}), ''), issue_id)" if vuln_title_sql else "issue_id"
+
+    cur.execute(f"""
+        SELECT
+            repo_name,
+            issue_id,
+            {title_expr} AS title,
+            COALESCE(LOWER({severity_sql}), 'unknown') AS severity,
+            COALESCE(package_name, '') AS package_name,
+            COALESCE(version, '') AS version,
+            COALESCE(cve, '') AS cve,
+            COUNT(*) AS occurrences
+        FROM snyk_findings
+        GROUP BY repo_name, issue_id, {title_expr}, COALESCE(LOWER({severity_sql}), 'unknown'),
+                 COALESCE(package_name, ''), COALESCE(version, ''), COALESCE(cve, '')
+        ORDER BY repo_name,
+                 CASE COALESCE(LOWER({severity_sql}), 'unknown')
+                     WHEN 'critical' THEN 0
+                     WHEN 'high' THEN 1
+                     WHEN 'medium' THEN 2
+                     WHEN 'low' THEN 3
+                     ELSE 4
+                 END,
+                 occurrences DESC;
+    """)
+
+    projects_map: dict[str, list] = {}
+    for repo_name, issue_id, title, severity_val, package_name, version, cve, occurrences in cur.fetchall():
+        info = dismissals.get((repo_name, issue_id))
+        item = {
+            "repo_name": repo_name,
+            "issue_id": issue_id,
+            "title": title,
+            "severity": severity_val,
+            "package_name": package_name,
+            "version": version,
+            "cve": cve,
+            "occurrences": int(occurrences),
+            "dismissed": bool(info and info["is_dismissed"]),
+            "reason": info["reason"] if info else None,
+            "dismissed_by": info["dismissed_by"] if info else None,
+            "dismissed_at": info["dismissed_at"] if info else None,
+        }
+        projects_map.setdefault(repo_name, []).append(item)
+
+    vulnerabilities_by_project = [
+        {"project_name": name, "items": items}
+        for name, items in sorted(
+            projects_map.items(),
+            key=lambda kv: sum(1 for i in kv[1] if not i["dismissed"]),
+            reverse=True,
+        )
+    ]
+
     data = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_findings": total_findings,
+        "total_dismissed": total_dismissed,
         "field_detection": {
             "repo_field": repo_field,
             "project_field": project_field,
@@ -261,6 +427,7 @@ def build_dashboard_data():
         "top_projects": top_projects,
         "project_summary": project_summary,
         "project_vulnerabilities": project_vulns,
+        "vulnerabilities_by_project": vulnerabilities_by_project,
     }
 
     with open(JSON_FILE, "w", encoding="utf-8") as f:
@@ -276,6 +443,51 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=BASE_DIR, **kwargs)
 
+    def _send_json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if self.path != "/api/dismissals":
+            self._send_json(404, {"error": "not found"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            raw = self.rfile.read(length) if length else b"{}"
+            payload = json.loads(raw or b"{}")
+        except (ValueError, json.JSONDecodeError):
+            self._send_json(400, {"error": "JSON inválido"})
+            return
+
+        action = str(payload.get("action", "")).strip().lower()
+        repo_name = str(payload.get("repo_name", "")).strip()
+        issue_id = str(payload.get("issue_id", "")).strip()
+
+        if not repo_name or not issue_id or action not in ("dismiss", "reactivate"):
+            self._send_json(400, {"error": "Faltan repo_name, issue_id o action inválida"})
+            return
+
+        try:
+            if action == "dismiss":
+                reason = str(payload.get("reason", "")).strip()
+                if not reason:
+                    self._send_json(400, {"error": "El motivo es obligatorio para descartar"})
+                    return
+                dismissed_by = str(payload.get("dismissed_by", "")).strip() or None
+                set_dismissal(repo_name, issue_id, reason, dismissed_by)
+            else:
+                clear_dismissal(repo_name, issue_id)
+
+            build_dashboard_data()
+            self._send_json(200, {"ok": True})
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
+
 
 def main():
     if not all([DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME]):
@@ -284,6 +496,7 @@ def main():
     if not os.path.exists(HTML_FILE):
         raise FileNotFoundError(f"No existe el HTML del dashboard: {HTML_FILE}")
 
+    ensure_dismissals_table()
     build_dashboard_data()
 
     port = int(os.getenv("SNYK_DASHBOARD_PORT", "8010"))
