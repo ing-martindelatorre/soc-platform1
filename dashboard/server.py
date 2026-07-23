@@ -514,7 +514,8 @@ def build_fortinet_threats_data(hours: int = 24, device_name: str | None = None)
             cur.execute(f"""
                 SELECT srcip, srcname, dstip, service, action, classification,
                        virus, filename, dtype, url, policyname,
-                       log_date::text AS log_date, log_time
+                       user_email, user_hostname, sender, recipient,
+                       log_date::text AS log_date, log_time, collected_at
                 FROM fortinet_threats
                 WHERE source='antivirus'
                   AND collected_at >= NOW() - INTERVAL '{interval}'
@@ -522,6 +523,20 @@ def build_fortinet_threats_data(hours: int = 24, device_name: str | None = None)
                 ORDER BY collected_at DESC LIMIT 200
             """, df_param)
             antivirus_records = [dict(r) for r in cur.fetchall()]
+
+            # Virus/archivo distintos que siguen apareciendo en la última hora —
+            # el resto ya dejó de repetirse y solo queda como historial del período.
+            cur.execute(f"""
+                SELECT COUNT(*) AS n FROM (
+                    SELECT virus, filename
+                    FROM fortinet_threats
+                    WHERE source='antivirus'
+                      AND collected_at >= NOW() - INTERVAL '1 hour'
+                      {df_sql}
+                    GROUP BY virus, filename
+                ) t
+            """, df_param)
+            active_virus_last_hour = int(cur.fetchone()["n"])
 
     # Enriquecer tráfico con reputación de IPs y descartar infraestructura conocida
     if _IP_INTEL_AVAILABLE:
@@ -581,6 +596,7 @@ def build_fortinet_threats_data(hours: int = 24, device_name: str | None = None)
             "total_vpn":          sum(counts.get("vpn", {}).values()),
             "total_virus":        sum(avc.values()),
             "blocked_virus":      avc.get("blocked", 0),
+            "active_virus_last_hour": active_virus_last_hour,
         },
         "traffic": {
             "records":   traffic_records,
@@ -629,12 +645,14 @@ def build_fortinet_threats_data(hours: int = 24, device_name: str | None = None)
         "antivirus": {
             "records": antivirus_records,
             "summary": {
-                "total":        sum(avc.values()),
-                "blocked":      avc.get("blocked", 0),
-                "detected":     avc.get("detected", 0),
-                "top_virus":    top_counter(antivirus_records, "virus"),
-                "top_srcip":    top_counter(antivirus_records, "srcip"),
-                "top_filename": top_counter(antivirus_records, "filename"),
+                "total":              sum(avc.values()),
+                "blocked":            avc.get("blocked", 0),
+                "detected":           avc.get("detected", 0),
+                "active_last_hour":   active_virus_last_hour,
+                "top_virus":          top_counter(antivirus_records, "virus"),
+                "top_srcip":          top_counter(antivirus_records, "srcip"),
+                "top_filename":       top_counter(antivirus_records, "filename"),
+                "top_recipient":      top_counter(antivirus_records, "recipient"),
             },
         },
     }
@@ -868,16 +886,18 @@ def build_cpanel_dashboard_data() -> dict:
             """)
             top_rejected_ips = [dict(r) for r in cur.fetchall()]
 
-            # Top spam senders (últimas 24h)
+            # Top spam senders (últimas 24h).
+            # spamd (maillog) no reporta remitente, solo el destinatario (usuario:uid);
+            # exim sí puede traer sender. Se agrupa por el que esté disponible.
             cur.execute("""
-                SELECT sender, COUNT(*) AS n,
+                SELECT COALESCE(sender, recipient) AS sender, COUNT(*) AS n,
                        ROUND(AVG(spam_score)::numeric, 2) AS avg_score,
                        MAX(spam_score) AS max_score
                 FROM cpanel_mail_events
                 WHERE event_type = 'spam'
                   AND event_time >= NOW() - INTERVAL '24 hours'
-                  AND sender IS NOT NULL
-                GROUP BY sender ORDER BY n DESC LIMIT 20
+                  AND COALESCE(sender, recipient) IS NOT NULL
+                GROUP BY COALESCE(sender, recipient) ORDER BY n DESC LIMIT 20
             """)
             top_spam = [dict(r) for r in cur.fetchall()]
 

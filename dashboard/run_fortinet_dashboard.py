@@ -8,6 +8,7 @@ from ipaddress import ip_address, ip_network
 from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
+from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
 
@@ -26,10 +27,11 @@ def get_conn():
 
 
 def fetch_antivirus_events(conn, device_name: str, hours: int = 24) -> List[Dict[str, Any]]:
-    with conn.cursor() as cur:
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """
             SELECT virus, filename, dtype, srcip, action, classification,
+                   recipient, sender, user_email,
                    log_date::text AS log_date, log_time
             FROM fortinet_threats
             WHERE source = 'antivirus'
@@ -280,6 +282,8 @@ def _render_antivirus_panel(events: List[Dict[str, Any]]) -> str:
             f"<td style='color:#ff4d6d;font-weight:700'>{escape(str(e.get('virus') or '—'))}</td>"
             f"<td style='color:#96a2b4;font-size:12px'>{escape(str(e.get('filename') or '—'))}</td>"
             f"<td>{escape(str(e.get('srcip') or '—'))}</td>"
+            f"<td>{escape(str(e.get('recipient') or e.get('user_email') or '—'))}</td>"
+            f"<td>{escape(str(e.get('sender') or '—'))}</td>"
             f"<td>{escape(str(e.get('dtype') or '—'))}</td>"
             f"<td style='color:{cls_color};font-weight:700'>{escape(str(e.get('classification') or '—'))}</td>"
             f"</tr>"
@@ -289,7 +293,7 @@ def _render_antivirus_panel(events: List[Dict[str, Any]]) -> str:
         "<h2>Antivirus — Últimas 24 horas</h2>"
         "<div class='table-wrap'>"
         "<table><thead><tr>"
-        "<th>Fecha</th><th>Hora</th><th>Virus</th><th>Archivo</th><th>Origen</th><th>Tipo</th><th>Estado</th>"
+        "<th>Fecha</th><th>Hora</th><th>Virus</th><th>Archivo</th><th>Origen</th><th>Buzón afectado</th><th>Remitente</th><th>Tipo</th><th>Estado</th>"
         f"</tr></thead><tbody>{rows_html}</tbody></table>"
         "</div></section>"
     )

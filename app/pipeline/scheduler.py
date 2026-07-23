@@ -8,7 +8,7 @@ Frecuencias:
   - Sentinel:         cada 5 minutos
   - Fortinet config:  cada 15 minutos
   - Fortinet logs:    cada 15 minutos (offset +7min)
-  - Fortinet threats: cada 15 minutos (offset +3min)
+  - Fortinet threats: cada 5 minutos (buffer de memoria del Forti rota rápido)
   - Nmap quick:       cada 6 horas
   - Nmap deep:        domingos 2am
   - Snyk:             domingos 1am
@@ -140,13 +140,14 @@ def main() -> None:
         start_date=now.replace(minute=(now.minute + 7) % 60),
     )
 
-    # ── FORTINET threats — cada 15 minutos (offset +3 min) ────────────────────
+    # ── FORTINET threats — cada 5 minutos (el buffer de memoria del Forti ────
+    # para logs de virus/ips es chico y rota rápido bajo ráfagas; con 15 min
+    # se perdían eventos entre polls) ─────────────────────────────────────────
     scheduler.add_job(
-        execute_job, trigger="interval", minutes=15,
+        execute_job, trigger="interval", minutes=5,
         args=["fortinet"], kwargs={"mode": "threats"},
         id="fortinet_threats_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=120,
-        start_date=now.replace(minute=(now.minute + 3) % 60),
+        max_instances=1, coalesce=True, misfire_grace_time=60,
     )
 
     # ── NMAP quick — cada 6 horas (perfil rápido: top-100 puertos) ───────────
@@ -228,7 +229,7 @@ def main() -> None:
     print("  Sentinel            cada 5 minutos")
     print("  Fortinet config     cada 15 minutos")
     print("  Fortinet logs       cada 15 minutos")
-    print("  Fortinet threats    cada 15 minutos")
+    print("  Fortinet threats    cada 5 minutos")
     print("  Nmap quick          cada 6 horas")
     print("  Nmap deep           domingos 02:00")
     print("  Snyk                diario 01:00")

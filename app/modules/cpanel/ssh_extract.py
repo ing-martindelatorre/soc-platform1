@@ -1,8 +1,11 @@
 """
 app/modules/cpanel/ssh_extract.py
 
-Extrae eventos de seguridad del log de Exim via SSH.
-Parsea /var/log/exim_mainlog buscando: spam, virus, rechazos, rebotes.
+Extrae eventos de seguridad de los logs de correo via SSH.
+Parsea /var/log/exim_mainlog buscando: virus, rechazos, rebotes.
+El veredicto real de SpamAssassin no queda en exim_mainlog -- lo emite el
+daemon spamd en /var/log/maillog ("identified spam (score/threshold) for
+user:uid ..."), así que ese archivo se parsea por separado.
 """
 from __future__ import annotations
 
@@ -72,6 +75,72 @@ _RE_REMOTE_IP   = re.compile(r'\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]')
 _RE_SENDER_FROM = re.compile(r'F=<([^>]*)>')
 _RE_SPAM_SCORE  = re.compile(r'(?:score|SA)[:\s]+([\d.]+)', re.IGNORECASE)
 _RE_SIZE        = re.compile(r'S=(\d+)')
+
+# =============================================================================
+# Parser de líneas spamd (/var/log/maillog) -- veredicto real de SpamAssassin.
+# Formato syslog sin año: "Jul 19 04:12:04 host spamd[16997]: spamd: ..."
+# =============================================================================
+_RE_MAILLOG_TS  = re.compile(r'^(\w{3}\s+\d{1,2} \d{2}:\d{2}:\d{2})')
+_RE_SPAMD_CHECK = re.compile(r'spamd\[(\d+)\]: spamd: checking message <([^>]*)> for (\S+):(\d+)')
+_RE_SPAMD_VERDICT = re.compile(
+    r'spamd\[(\d+)\]: spamd: (identified spam|clean message) '
+    r'\(([-\d.]+)/([\d.]+)\) for (\S+):(\d+) in ([\d.]+) seconds, (\d+) bytes\.'
+)
+
+
+def _parse_maillog_timestamp(ts_text: str) -> Optional[str]:
+    now = datetime.now(timezone.utc)
+    try:
+        dt = datetime.strptime(f"{now.year} {ts_text}", "%Y %b %d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    if dt > now:
+        dt = dt.replace(year=now.year - 1)
+    return dt.isoformat()
+
+
+def _parse_maillog(raw_log: str) -> List[Dict[str, Any]]:
+    """Solo se guarda 'identified spam': es el único veredicto accionable de spamd."""
+    pid_to_msgid: Dict[str, str] = {}
+    events: List[Dict[str, Any]] = []
+
+    for line in raw_log.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        m_check = _RE_SPAMD_CHECK.search(line)
+        if m_check:
+            pid, msgid, _user, _uid = m_check.groups()
+            pid_to_msgid[pid] = msgid
+            continue
+
+        m_verdict = _RE_SPAMD_VERDICT.search(line)
+        if not m_verdict:
+            continue
+        pid, verdict, score, _threshold, user, uid, _scantime, size_bytes = m_verdict.groups()
+        if verdict != "identified spam":
+            continue
+
+        ts_m = _RE_MAILLOG_TS.match(line)
+        event_time = _parse_maillog_timestamp(ts_m.group(1)) if ts_m else None
+
+        events.append({
+            "event_time":    event_time,
+            "event_type":    "spam",
+            "message_id":    pid_to_msgid.pop(pid, None),
+            "sender":        None,
+            "recipient":     f"{user}:{uid}",
+            "remote_host":   None,
+            "remote_ip":     None,
+            "spam_score":    float(score),
+            "reject_reason": None,
+            "size_bytes":    int(size_bytes),
+            "line_hash":     hashlib.sha256(line.encode()).hexdigest(),
+            "raw":           line[:500],
+        })
+
+    return events
 
 
 def _parse_line(line: str) -> Optional[Dict[str, Any]]:
@@ -207,6 +276,11 @@ def extract_logs(lines: int = 20000, **kwargs) -> Dict[str, Any]:
             ev = _parse_line(line)
             if ev:
                 events.append(ev)
+
+        # Veredicto real de SpamAssassin -- vive en maillog, no en exim_mainlog.
+        raw_maillog = _run(client, f"tail -n {lines} /var/log/maillog 2>/dev/null")
+        events.extend(_parse_maillog(raw_maillog))
+
         data["events"] = events
 
         # Cola de correo actual

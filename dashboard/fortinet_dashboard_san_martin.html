@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fortinet Dashboard - san-martin</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #121922;
+      --panel-2: #0f141c;
+      --text: #e8edf2;
+      --muted: #96a2b4;
+      --accent: #e53935;
+      --accent-2: #ff6b6b;
+      --border: #243041;
+      --ok: #2ecc71;
+      --warn: #f39c12;
+      --bad: #ff5d5d;
+      --info: #5dade2;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, Segoe UI, Arial, sans-serif; background: linear-gradient(180deg, #090c11, #0d1218); color: var(--text); }
+    .wrap { max-width: 1500px; margin: 0 auto; padding: 28px; }
+    .hero { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 22px; }
+    .hero h1 { margin: 0; font-size: 34px; }
+    .subtitle { color: var(--muted); margin-top: 8px; }
+    .stamp { border: 1px solid var(--accent); color: var(--accent-2); padding: 10px 14px; border-radius: 999px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 22px; }
+    .card { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--border); border-radius: 18px; padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.22); }
+    .label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+    .value { font-size: 28px; font-weight: 800; }
+    .layout { display: grid; grid-template-columns: 1.1fr .9fr; gap: 18px; margin-bottom: 18px; }
+    .panel { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--border); border-radius: 22px; padding: 18px; margin-bottom: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.22); }
+    .panel h2 { margin: 0 0 12px; font-size: 20px; }
+    .muted { color: var(--muted); }
+    .finding { border: 1px solid var(--border); border-radius: 16px; padding: 14px; margin-bottom: 12px; background: rgba(255,255,255,0.015); }
+    .finding.alta { border-color: rgba(255,93,93,.35); }
+    .finding.media { border-color: rgba(243,156,18,.35); }
+    .finding.info { border-color: rgba(93,173,226,.35); }
+    .finding-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .finding-head h3 { margin: 0; font-size: 17px; }
+    .sev { font-size: 11px; padding: 5px 8px; border-radius: 999px; background: rgba(229,57,53,.13); color: var(--accent-2); font-weight: 800; letter-spacing: .08em; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.07); vertical-align: top; }
+    th { color: #c8d1dc; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    tr:hover td { background: rgba(255,255,255,.02); }
+    .foot { color: var(--muted); font-size: 12px; padding: 4px 2px 20px; }
+    @media (max-width: 1200px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .layout { grid-template-columns: 1fr; } }
+    @media (max-width: 800px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hero { flex-direction: column; align-items: start; } }
+    @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } .wrap { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <h1>Fortinet Security Dashboard</h1>
+        <div class="subtitle">Dispositivo: san-martin · Hostname: san-martin · Serial: N/D · VDOM: root</div>
+      </div>
+      <div class="stamp">Leviathan SOC</div>
+    </div>
+
+    <section class="grid"><div class='card'><div class='label'>Dispositivo</div><div class='value'>san-martin</div></div><div class='card'><div class='label'>Serial</div><div class='value'>N/D</div></div><div class='card'><div class='label'>Versión</div><div class='value'>N/D</div></div><div class='card'><div class='label'>Build</div><div class='value'>N/D</div></div><div class='card'><div class='label'>VDOM</div><div class='value'>root</div></div><div class='card'><div class='label'>Policies</div><div class='value'>0</div></div><div class='card'><div class='label'>Addresses</div><div class='value'>0</div></div><div class='card'><div class='label'>Interfaces</div><div class='value'>0</div></div><div class='card'><div class='label'>Routes</div><div class='value'>0</div></div><div class='card'><div class='label'>Admins</div><div class='value'>0</div></div><div class='card'><div class='label'>Virus 24h</div><div class='value'>0</div></div><div class='card'><div class='label'>Findings</div><div class='value'>2</div></div></section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>Hallazgos prioritarios</h2>
+        <div class='finding media'><div class='finding-head'><span class='sev'>MEDIA</span><h3>No se pudieron leer administradores</h3></div><p>La API devolvió 0 admins. Puede ser permiso insuficiente o endpoint sin acceso con ese perfil API.</p></div><div class='finding media'><div class='finding-head'><span class='sev'>MEDIA</span><h3>Errores recientes de recolección: 20</h3></div><p>system_status: HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/monitor/system/status?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afa5e75a90&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;)); ha_status: HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/monitor/system/ha-status?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afc0984290&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;)); interfaces: HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/system/interface?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbd89fad0&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</p></div>
+      </div>
+      <div class="panel">
+        <h2>Resumen ejecutivo</h2>
+        <p><strong>Equipo:</strong> san-martin</p>
+        <p><strong>Versión:</strong> N/D (build N/D)</p>
+        <p><strong>Configuración visible:</strong> 0 políticas, 0 objetos de dirección, 0 interfaces y 0 rutas.</p>
+        <p><strong>Estado del módulo:</strong> recolección y carga a PostgreSQL funcionando.</p>
+        <p><strong>Observación:</strong> el endpoint de HA puede no estar soportado o no aplicar a este equipo.</p>
+      </div>
+    </section>
+
+    <section class='panel'><h2>Antivirus — Últimas 24 horas</h2><p class='muted'>Sin detecciones de malware en las últimas 24 horas.</p></section>
+    <section class='panel'><h2>Top políticas de firewall</h2><p class='muted'>Sin datos.</p></section>
+    <section class='panel'><h2>Interfaces</h2><p class='muted'>Sin datos.</p></section>
+    <section class='panel'><h2>Objetos de dirección</h2><p class='muted'>Sin datos.</p></section>
+    <section class='panel'><h2>Rutas estáticas</h2><p class='muted'>Sin datos.</p></section>
+    <section class='panel'><h2>Errores de recolección</h2><div class='table-wrap'><table><thead><tr><th>Sección</th><th>Fecha</th><th>Error</th></tr></thead><tbody><tr><td>system_status</td><td>2026-07-23T23:08:00.810318+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/monitor/system/status?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afa5e75a90&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>ha_status</td><td>2026-07-23T23:08:00.810318+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/monitor/system/ha-status?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afc0984290&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>interfaces</td><td>2026-07-23T23:08:00.810318+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/system/interface?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbd89fad0&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>firewall_addresses</td><td>2026-07-23T23:08:00.810318+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/firewall/address?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbd89eff0&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>firewall_policies</td><td>2026-07-23T23:08:00.810318+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/firewall/policy?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afc09869f0&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>router_static</td><td>2026-07-23T23:08:00.810318+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/router/static?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbd89f380&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>system_admins</td><td>2026-07-23T23:08:00.810318+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/system/admin?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbd89fb60&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>system_status</td><td>2026-07-23T22:53:01.766015+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/monitor/system/status?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbdb0b290&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>ha_status</td><td>2026-07-23T22:53:01.766015+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/monitor/system/ha-status?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afa5c9aa20&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>interfaces</td><td>2026-07-23T22:53:01.766015+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/system/interface?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afa5c99790&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>firewall_addresses</td><td>2026-07-23T22:53:01.766015+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/firewall/address?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbdb20920&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>firewall_policies</td><td>2026-07-23T22:53:01.766015+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/firewall/policy?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afa5c9af00&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>router_static</td><td>2026-07-23T22:53:01.766015+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/router/static?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afa5c9b230&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>system_admins</td><td>2026-07-23T22:53:01.766015+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/system/admin?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbdb21520&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>system_status</td><td>2026-07-23T22:38:08.095470+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/monitor/system/status?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbcbfd730&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>ha_status</td><td>2026-07-23T22:38:08.095470+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/monitor/system/ha-status?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbdc41910&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>interfaces</td><td>2026-07-23T22:38:08.095470+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/system/interface?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbdc29b50&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>firewall_addresses</td><td>2026-07-23T22:38:08.095470+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/firewall/address?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbdc28ec0&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>firewall_policies</td><td>2026-07-23T22:38:08.095470+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/firewall/policy?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afa5f71ee0&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr><tr><td>router_static</td><td>2026-07-23T22:38:08.095470+00:00</td><td>HTTPSConnectionPool(host=&#x27;192.168.88.1&#x27;, port=4433): Max retries exceeded with url: /api/v2/cmdb/router/static?vdom=root (Caused by ConnectTimeoutError(&lt;HTTPSConnection(host=&#x27;192.168.88.1&#x27;, port=4433) at 0x79afbdc2a540&gt;, &#x27;Connection to 192.168.88.1 timed out. (connect timeout=30)&#x27;))</td></tr></tbody></table></div></section>
+
+    <div class="foot">Dashboard generado automáticamente desde PostgreSQL. Archivo listo para abrirse en navegador o integrarse al repo del SOC.</div>
+  </div>
+</body>
+</html>

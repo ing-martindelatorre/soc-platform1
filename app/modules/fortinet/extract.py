@@ -35,6 +35,12 @@ FORTINET_THREAT_ENDPOINTS = {
     "virus":           "/api/v2/log/memory/virus",
 }
 
+# Inventario de dispositivos que mantiene FortiGate (DHCP + sniffing de auth
+# POP3/IMAP/FTP vía FSSO). Trae, por IP, el hostname del equipo y el
+# "unauth_user" (usuario/email detectado en la autenticación). Se usa para
+# resolver srcip -> email en los registros de amenazas (ver transform.py).
+DEVICE_INVENTORY_ENDPOINT = "/api/v2/monitor/user/device/query"
+
 # Número máximo de dispositivos soportados
 _MAX_DEVICES = 5
 
@@ -315,6 +321,30 @@ def extract_threats(device_id: int = 1, **kwargs) -> Dict[str, Any]:
                     "path":    path,
                     "error":   error_text,
                 })
+
+    try:
+        inventory_result = fetch(DEVICE_INVENTORY_ENDPOINT, cfg)
+        inventory_records = inventory_result.get("results", [])
+        if not isinstance(inventory_records, list):
+            inventory_records = []
+        data["sections"]["device_inventory"] = {
+            "endpoint": DEVICE_INVENTORY_ENDPOINT,
+            "results":  inventory_records,
+        }
+    except Exception as exc:
+        error_text = str(exc)
+        if "404" in error_text:
+            data["sections"]["device_inventory"] = {
+                "endpoint":      DEVICE_INVENTORY_ENDPOINT,
+                "results":       [],
+                "not_available": True,
+            }
+        else:
+            data["errors"].append({
+                "section": "device_inventory",
+                "path":    DEVICE_INVENTORY_ENDPOINT,
+                "error":   error_text,
+            })
 
     data["summary"] = {
         "total_records": total_records,

@@ -147,12 +147,36 @@ def load_logs(data: Dict[str, Any]) -> None:
 # THREATS
 # =============================================================================
 def _insert_threats_batch(cur, device_name: str, source: str, records: List[Dict]) -> int:
-    """Inserta un lote de registros de amenazas en fortinet_threats."""
+    """
+    Inserta un lote de registros de amenazas en fortinet_threats.
+
+    El buffer de memoria del FortiGate no rota entre cada poll, así que el
+    mismo evento puede venir repetido en corridas consecutivas. Para
+    'antivirus' se deduplica por campos de negocio (ver
+    sql/020_fortinet_antivirus_dedup.sql). Para 'traffic', 'event', 'vpn' y
+    'webfilter' se deduplica por 'eventtime' (timestamp en nanosegundos que
+    trae FortiGate en cada entrada de log, ver sql/023_fortinet_threats_eventtime_dedup.sql).
+    """
+    if source == "antivirus":
+        on_conflict = """
+        ON CONFLICT (device_name, log_date, log_time, srcip, dstip, dstport, virus, filename)
+        WHERE source = 'antivirus'
+        DO NOTHING
+        """
+    elif source in ("traffic", "event", "vpn", "webfilter"):
+        on_conflict = """
+        ON CONFLICT (device_name, source, eventtime)
+        WHERE source IN ('traffic', 'event', 'vpn', 'webfilter') AND eventtime IS NOT NULL
+        DO NOTHING
+        """
+    else:
+        on_conflict = ""
+
     inserted = 0
     for rec in records:
         try:
             cur.execute(
-                """
+                f"""
                 INSERT INTO fortinet_threats (
                     device_name, source, classification,
                     log_date, log_time, level, action, logdesc, msg,
@@ -160,6 +184,8 @@ def _insert_threats_batch(cur, device_name: str, source: str, records: List[Dict
                     app, apprisk, hostname, url, catdesc, policyname,
                     sentbyte, rcvdbyte,
                     virus, filename, dtype,
+                    user_hostname, user_email, eventtime,
+                    sender, recipient,
                     payload
                 ) VALUES (
                     %s, %s, %s,
@@ -168,8 +194,11 @@ def _insert_threats_batch(cur, device_name: str, source: str, records: List[Dict
                     %s, %s, %s, %s, %s, %s,
                     %s, %s,
                     %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s,
                     %s::jsonb
                 )
+                {on_conflict}
                 """,
                 (
                     device_name,
@@ -198,6 +227,11 @@ def _insert_threats_batch(cur, device_name: str, source: str, records: List[Dict
                     rec.get("virus"),
                     rec.get("filename"),
                     rec.get("dtype"),
+                    rec.get("user_hostname"),
+                    rec.get("user_email"),
+                    _to_int(rec.get("eventtime")),
+                    rec.get("sender"),
+                    rec.get("recipient"),
                     json.dumps(rec),
                 ),
             )

@@ -15,6 +15,27 @@ def _results(section: Dict[str, Any]) -> List[Dict[str, Any]]:
     return results if isinstance(results, list) else []
 
 
+def _device_map(sections: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Mapa srcip -> {hostname, email} a partir del inventario de dispositivos."""
+    mapping: Dict[str, Dict[str, Any]] = {}
+    for dev in _results(sections.get("device_inventory", {})):
+        ip = dev.get("ipv4_address")
+        if ip:
+            mapping[ip] = {
+                "hostname": dev.get("hostname"),
+                "email":    dev.get("unauth_user"),
+            }
+    return mapping
+
+
+def _user_fields(entry: Dict[str, Any], device_map: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    info = device_map.get(entry.get("srcip")) or {}
+    return {
+        "user_hostname": info.get("hostname"),
+        "user_email":    info.get("email"),
+    }
+
+
 def _top_counter(items: List[Dict[str, Any]], key: str, limit: int = 10) -> List[Dict[str, Any]]:
     counter = Counter()
     for item in items:
@@ -166,7 +187,8 @@ def _classify_webfilter(entry: Dict[str, Any]) -> str:
 
 
 def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
-    sections = data.get("sections", {})
+    sections   = data.get("sections", {})
+    device_map = _device_map(sections)
 
     # ── Tráfico forward ──────────────────────────────────────────────────────
     traffic_records = _results(sections.get("traffic_forward", {}))
@@ -188,7 +210,9 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
             "policyname":   entry.get("policyname"),
             "sentbyte":     entry.get("sentbyte"),
             "rcvdbyte":     entry.get("rcvdbyte"),
+            "eventtime":    entry.get("eventtime"),
             "classification": classification,
+            **_user_fields(entry, device_map),
         })
 
     traffic_summary = {
@@ -218,6 +242,7 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
             "cpu":          entry.get("cpu"),
             "mem":          entry.get("mem"),
             "totalsession": entry.get("totalsession"),
+            "eventtime":    entry.get("eventtime"),
             "classification": classification,
         })
 
@@ -264,7 +289,9 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
             "catdesc":        entry.get("catdesc"),
             "profile":        entry.get("profile"),
             "dstcountry":     entry.get("dstcountry"),
+            "eventtime":      entry.get("eventtime"),
             "classification": classification,
+            **_user_fields(entry, device_map),
         })
 
     webfilter_summary = {
@@ -301,7 +328,10 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
             "level":        entry.get("level"),
             "msg":          entry.get("msg"),
             "logdesc":      entry.get("logdesc"),
+            "sender":       entry.get("from"),
+            "recipient":    entry.get("to"),
             "classification": classification,
+            **_user_fields(entry, device_map),
         })
 
     virus_summary = {
@@ -316,6 +346,8 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
 
     # ── IPS ──────────────────────────────────────────────────────────────────
     ips_records = _results(sections.get("ips", {}))
+    for entry in ips_records:
+        entry.update(_user_fields(entry, device_map))
     ips_summary = {
         "total":       len(ips_records),
         "top_attack":  _top_counter(ips_records, "attack", 10),
@@ -325,6 +357,8 @@ def transform_threats(data: Dict[str, Any]) -> Dict[str, Any]:
 
     # ── VPN ──────────────────────────────────────────────────────────────────
     vpn_records = _results(sections.get("event_vpn", {}))
+    for entry in vpn_records:
+        entry.update(_user_fields(entry, device_map))
     vpn_summary = {
         "total":       len(vpn_records),
         "top_action":  _top_counter(vpn_records, "action", 5),

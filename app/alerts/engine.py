@@ -202,12 +202,28 @@ def build_email_html(
     entities_table: str = "",
     asset_name: str = "",
     action_key: str = "",
+    mailbox: str = "",
+    mail_sender: str = "",
 ) -> str:
     soc_url  = os.getenv("SOC_URL", "localhost:8888")
     style    = SEVERITY_STYLES.get(severity.lower(), SEVERITY_STYLES["default"])
     mod_name = MODULE_NAMES.get(module, module.capitalize())
     actions  = ACTION_ITEMS.get(action_key) or ACTION_ITEMS.get(module, ACTION_ITEMS["sentinel"])
     action_html = "\n".join(f"<li>{a}</li>" for a in actions)
+
+    # Solo aplica a antivirus/POP3 — fila vacía si no hay buzón resuelto
+    mailbox_info_html = ""
+    if mailbox and mailbox != "—":
+        mailbox_info_html = (
+            "<div class='detection-row'>"
+            "<span class='label'>Buzón afectado</span>"
+            f"<span class='value highlight'>{mailbox}</span>"
+            "</div>"
+            "<div class='detection-row'>"
+            "<span class='label'>Remitente</span>"
+            f"<span class='value'>{mail_sender or '—'}</span>"
+            "</div>"
+        )
 
     try:
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -245,6 +261,7 @@ def build_email_html(
         "{{LAST_SEEN}}":         last_seen or alert_datetime,
         "{{ENTITIES_TABLE}}":    entities_table,
         "{{ASSET_NAME}}":        asset_name or "—",
+        "{{MAILBOX_INFO}}":      mailbox_info_html,
     }
 
     html = template
@@ -349,7 +366,9 @@ QUERIES = {
                 MIN(collected_at)                     AS first_seen,
                 MAX(collected_at)                     AS last_seen,
                 COALESCE(MAX(filename), '—')          AS extra,
-                device_name                           AS asset_name
+                device_name                           AS asset_name,
+                COALESCE(MAX(recipient), MAX(user_email), '—') AS mailbox,
+                COALESCE(MAX(sender), '—')            AS mail_sender
             FROM fortinet_threats
             WHERE source = 'antivirus'
               {device_filter}
@@ -417,6 +436,7 @@ def _build_alert_context(rows: list[dict]) -> dict:
             "source_host": "—", "destination": "—", "description": "Sin detalles",
             "severity": "info", "total_events": 0, "unique_sources": 0,
             "first_seen": "—", "last_seen": "—",
+            "mailbox": "—", "mail_sender": "—",
         }
 
     total_events   = sum(int(r.get("event_count", 1)) for r in rows)
@@ -463,6 +483,8 @@ def _build_alert_context(rows: list[dict]) -> dict:
         "first_seen":     first_seen[:19],
         "last_seen":      last_seen[:19],
         "asset_name":     asset_name,
+        "mailbox":        str(top.get("mailbox", "—")),
+        "mail_sender":    str(top.get("mail_sender", "—")),
     }
 
 
@@ -476,6 +498,10 @@ def _generate_entities_table(rows: list[dict]) -> str:
     th  = "padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#8a9bb5;background:#f7f9fc;font-weight:700"
     thr = th + ";text-align:right"
 
+    # El buzón afectado solo aplica a antivirus/POP3 — se muestra la columna
+    # únicamente si al menos una fila la trae, para no ensuciar otras alertas.
+    show_mailbox = any(r.get("mailbox") and r["mailbox"] != "—" for r in rows)
+
     body = ""
     for r in rows:
         count  = int(r.get("event_count", 1))
@@ -484,16 +510,20 @@ def _generate_entities_table(rows: list[dict]) -> str:
         detail = str(r.get("detail", "—"))[:60]
         first  = str(r.get("first_seen", "—"))[:16]
         last_  = str(r.get("last_seen",  "—"))[:16]
+        mailbox_td = f"<td style='{td}'>{str(r.get('mailbox', '—'))}</td>" if show_mailbox else ""
         body += (
             f"<tr>"
             f"<td style='{td}'><strong>{asset}</strong></td>"
             f"<td style='{td}'>{src}</td>"
             f"<td style='{td}'>{detail}</td>"
+            f"{mailbox_td}"
             f"<td style='{tdr}'><strong>{count:,}</strong></td>"
             f"<td style='{tdr}'>{first}</td>"
             f"<td style='{tdr}'>{last_}</td>"
             f"</tr>"
         )
+
+    mailbox_th = f"<th style='{th}'>Buzón afectado</th>" if show_mailbox else ""
 
     return (
         f"<div style='margin:20px 0;border:1px solid #e0e6f0;border-radius:10px;overflow:hidden'>"
@@ -502,6 +532,7 @@ def _generate_entities_table(rows: list[dict]) -> str:
         f"<th style='{th}'>Dispositivo</th>"
         f"<th style='{th}'>Origen</th>"
         f"<th style='{th}'>Detalle</th>"
+        f"{mailbox_th}"
         f"<th style='{thr}'>Eventos</th>"
         f"<th style='{thr}'>Primera det.</th>"
         f"<th style='{thr}'>Última det.</th>"
@@ -711,12 +742,17 @@ def evaluate_and_send() -> int:
                 entities_table=entities_table,
                 asset_name=asset_name,
                 action_key=f"{module}_{field}",
+                mailbox=ctx.get("mailbox", "—"),
+                mail_sender=ctx.get("mail_sender", "—"),
             )
 
             # ── 4. Enviar email y Slack ────────────────────────────────────────
             subject = rule["subject"]
             if asset_name and asset_name != "—":
                 subject = f"{subject} [{asset_name}]"
+            mailbox_subj = ctx.get("mailbox", "—")
+            if mailbox_subj and mailbox_subj != "—":
+                subject = f"{subject} — {mailbox_subj}"
             recipients = list(rule["recipients"])
             success    = send_email(recipients, subject, html)
             status     = "sent" if success else "failed"

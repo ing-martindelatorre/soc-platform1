@@ -18,7 +18,7 @@ SOC Platform 1 is a security data aggregation platform that pulls data from four
 
 **Scheduler** (`app/pipeline/scheduler.py`) — APScheduler in blocking mode, timezone hardcoded to `America/Mexico_City`. Schedule:
 - Sentinel: every 5 min
-- Fortinet config: every 15 min; Fortinet logs: +7 min offset; Fortinet threats: +3 min offset
+- Fortinet config: every 15 min; Fortinet logs: +7 min offset; Fortinet threats: every 5 min (memory-log buffer rotates fast)
 - Nmap quick: every 6 h; Nmap deep: Sundays 2 am
 - Snyk: Sundays 1 am
 

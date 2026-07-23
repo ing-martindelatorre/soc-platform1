@@ -287,9 +287,13 @@
     </div>
 
     <div class="tab-content" id="tab-antivirus">
+      <label style="display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);margin-bottom:10px;cursor:pointer">
+        <input type="checkbox" id="av-only-active" checked onchange="renderAntivirusTable()">
+        Ocultar virus que ya dejaron de detectarse (sin nueva ocurrencia en la última hora)
+      </label>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Hora</th><th>Origen</th><th>Destino</th><th>Virus</th><th>Archivo</th><th>Tipo</th><th>Acción</th><th>Estado</th></tr></thead>
+          <thead><tr><th>Hora</th><th>Origen</th><th>Destino</th><th>Virus</th><th>Archivo</th><th>Buzón afectado</th><th>Remitente</th><th>Tipo</th><th>Acción</th><th>Estado</th></tr></thead>
           <tbody id="antivirus-body"></tbody>
         </table>
       </div>
@@ -488,6 +492,7 @@ function render(data) {
     { label: 'Webfilter block',value: s.blocked_webfilter  || 0, cls: (s.blocked_webfilter||0) > 0 ? 'red' : '' },
     { label: 'IPS alerts',     value: s.total_ips          || 0, cls: (s.total_ips||0) > 0 ? 'red' : 'green' },
     { label: 'Virus bloqueados',value: s.blocked_virus     || 0, cls: (s.blocked_virus||0) > 0 ? 'red' : 'green' },
+    { label: 'Virus activos (1h)',value: s.active_virus_last_hour || 0, cls: (s.active_virus_last_hour||0) > 0 ? 'red' : 'green' },
   ];
 
   document.getElementById('kpis').innerHTML = kpis.map(k => `
@@ -574,14 +579,32 @@ function render(data) {
     </tr>`).join('');
 
   // Tabla Antivirus
-  const avRecords = (data.antivirus?.records||[]).slice(0,100);
-  document.getElementById('antivirus-body').innerHTML = !avRecords.length ? '<tr><td colspan="8" class="empty">Sin detecciones de malware en este período</td></tr>' :
+  lastAntivirusRecords = data.antivirus?.records || [];
+  renderAntivirusTable();
+}
+
+let lastAntivirusRecords = [];
+const ACTIVE_WINDOW_MS = 60 * 60 * 1000; // 1 hora
+
+function renderAntivirusTable() {
+  const onlyActive = document.getElementById('av-only-active').checked;
+  const cutoff     = Date.now() - ACTIVE_WINDOW_MS;
+
+  let avRecords = lastAntivirusRecords;
+  if (onlyActive) {
+    avRecords = avRecords.filter(r => r.collected_at && new Date(r.collected_at).getTime() >= cutoff);
+  }
+  avRecords = avRecords.slice(0, 100);
+
+  document.getElementById('antivirus-body').innerHTML = !avRecords.length ? '<tr><td colspan="10" class="empty">Sin detecciones de malware activas (desmarca el filtro para ver el histórico completo del período)</td></tr>' :
     avRecords.map(r => `<tr>
       <td>${esc(r.log_time||'—')}</td>
       <td>${esc(r.srcname||r.srcip||'—')}</td>
       <td>${esc(r.dstip||'—')}</td>
       <td style="color:#ff4d6d;font-weight:700">${esc(r.virus||'—')}</td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${esc(r.filename||'—')}</td>
+      <td>${esc(r.recipient||r.user_email||'—')}</td>
+      <td>${esc(r.sender||'—')}</td>
       <td>${esc(r.dtype||'—')}</td>
       <td>${esc(r.action||'—')}</td>
       <td>${clsBadge(r.classification)}</td>
