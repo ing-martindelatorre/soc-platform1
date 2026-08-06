@@ -4,24 +4,23 @@ app/pipeline/scheduler.py
 Motor de recolección del SOC Platform.
 Ejecuta cada pipeline con su frecuencia propia e independiente.
 
-Frecuencias:
-  - Sentinel:         cada 5 minutos
-  - Fortinet config:  cada 15 minutos
-  - Fortinet logs:    cada 15 minutos (offset +7min)
-  - Fortinet threats: cada 5 minutos (buffer de memoria del Forti rota rápido)
-  - Nmap quick:       cada 6 horas
-  - Nmap deep:        domingos 2am
-  - Snyk:             domingos 1am
+Las frecuencias de los jobs de recolección (Sentinel, Fortinet, Nmap, Snyk,
+cPanel) ya NO están hardcodeadas aquí: se leen de la tabla `job_config`
+(ver app/pipeline/job_config.py) y pueden cambiarse en caliente desde el
+panel de configuración del dashboard — el job `config_watcher_job` revisa
+esa tabla cada 30s y reprograma/pausa/reanuda los jobs sin reiniciar este
+proceso.
 """
 
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from app.alerts.engine import evaluate_and_send, evaluate_job_failures
 from app.core.db import get_connection
 from app.pipeline.cleanup import run_data_cleanup
+from app.pipeline.job_config import JOB_DEFINITIONS, build_trigger, get_all_schedules
 from app.pipeline.runner import run_pipeline
 
 
@@ -89,6 +88,47 @@ def execute_alert_job() -> None:
         print(f"[alerts] ERROR en fallos de pipeline: {exc}")
 
 
+# =============================================================================
+# Aplicación en caliente de cambios de intervalo (panel de configuración)
+# =============================================================================
+
+# Cache en memoria de (schedule_type, schedule_value, enabled) por job,
+# para detectar cambios sin reprogramar de más en cada tick.
+_applied_schedules: dict[str, tuple] = {}
+
+
+def sync_job_schedules(scheduler: BlockingScheduler) -> None:
+    try:
+        schedules = get_all_schedules()
+    except Exception as exc:
+        print(f"[config] ERROR leyendo job_config: {exc}")
+        return
+
+    for job_id, row in schedules.items():
+        current = (row["schedule_type"], row["schedule_value"], row["enabled"])
+        previous = _applied_schedules.get(job_id)
+
+        if previous == current:
+            continue
+
+        try:
+            if row["enabled"]:
+                if previous is None or previous[:2] != current[:2]:
+                    trigger = build_trigger(row["schedule_type"], row["schedule_value"])
+                    scheduler.reschedule_job(job_id, trigger=trigger)
+                    print(f"[config] {job_id}: intervalo actualizado a {row['schedule_type']}={row['schedule_value']}")
+                if previous is not None and not previous[2]:
+                    scheduler.resume_job(job_id)
+                    print(f"[config] {job_id}: reactivado")
+            else:
+                scheduler.pause_job(job_id)
+                print(f"[config] {job_id}: desactivado")
+
+            _applied_schedules[job_id] = current
+        except Exception as exc:
+            print(f"[config] ERROR aplicando cambio a {job_id}: {exc}")
+
+
 def execute_job(job_name: str, **kwargs) -> None:
     run_id  = register_job_start(job_name)
     started = datetime.now(timezone.utc)
@@ -115,96 +155,40 @@ def main() -> None:
 
     now = datetime.now(timezone.utc)
 
-    # ── SENTINEL — cada 5 minutos ─────────────────────────────────────────────
-    scheduler.add_job(
-        execute_job, trigger="interval", minutes=5,
-        args=["sentinel"],
-        id="sentinel_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=60,
-    )
+    # ── JOBS DE RECOLECCIÓN — Sentinel, Fortinet, Nmap, Snyk, cPanel ─────────
+    # Frecuencia leída de job_config (ver app/pipeline/job_config.py);
+    # config_watcher_job la reaplica en caliente si cambia desde el panel.
+    schedules = get_all_schedules()
 
-    # ── FORTINET config — cada 15 minutos ─────────────────────────────────────
-    scheduler.add_job(
-        execute_job, trigger="interval", minutes=15,
-        args=["fortinet"], kwargs={"mode": "config"},
-        id="fortinet_config_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=120,
-    )
+    for jd in JOB_DEFINITIONS:
+        job_id = jd["job_id"]
+        row    = schedules[job_id]
 
-    # ── FORTINET logs — cada 15 minutos (offset +7 min) ───────────────────────
-    scheduler.add_job(
-        execute_job, trigger="interval", minutes=15,
-        args=["fortinet"], kwargs={"mode": "logs"},
-        id="fortinet_logs_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=120,
-        start_date=now.replace(minute=(now.minute + 7) % 60),
-    )
+        start_date = None
+        if jd["start_offset_minutes"]:
+            start_date = now + timedelta(minutes=jd["start_offset_minutes"])
 
-    # ── FORTINET threats — cada 5 minutos (el buffer de memoria del Forti ────
-    # para logs de virus/ips es chico y rota rápido bajo ráfagas; con 15 min
-    # se perdían eventos entre polls) ─────────────────────────────────────────
-    scheduler.add_job(
-        execute_job, trigger="interval", minutes=5,
-        args=["fortinet"], kwargs={"mode": "threats"},
-        id="fortinet_threats_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=60,
-    )
+        trigger = build_trigger(row["schedule_type"], row["schedule_value"], start_date=start_date)
 
-    # ── NMAP quick — cada 6 horas (perfil rápido: top-100 puertos) ───────────
-    scheduler.add_job(
-        execute_job, trigger="interval", hours=6,
-        args=["nmap"], kwargs={"profile_override": "quick"},
-        id="nmap_quick_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=300,
-    )
+        scheduler.add_job(
+            execute_job, trigger=trigger,
+            args=jd["args"], kwargs=jd["kwargs"],
+            id=job_id, replace_existing=True,
+            max_instances=1, coalesce=True,
+            misfire_grace_time=jd["misfire_grace_time"],
+        )
+        if not row["enabled"]:
+            scheduler.pause_job(job_id)
 
-    # ── NMAP deep — domingos 2am (escaneo TCP completo) ───────────────────────
-    scheduler.add_job(
-        execute_job, trigger="cron", day_of_week="sun", hour=2, minute=0,
-        args=["nmap"], kwargs={"profile_override": "full_tcp"},
-        id="nmap_deep_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=600,
-    )
+        _applied_schedules[job_id] = (row["schedule_type"], row["schedule_value"], row["enabled"])
 
-    # ── SNYK — diario 1am ────────────────────────────────────────────────────
+    # ── WATCHER DE CONFIGURACIÓN — cada 30s ──────────────────────────────────
+    # Revisa job_config y aplica cambios de intervalo/enabled en caliente.
     scheduler.add_job(
-        execute_job, trigger="cron", hour=1, minute=0,
-        args=["snyk"],
-        id="snyk_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=600,
-    )
-
-    # ── CPANEL stats — cada 15 minutos ───────────────────────────────────────
-    scheduler.add_job(
-        execute_job, trigger="interval", minutes=15,
-        args=["cpanel"], kwargs={"mode": "stats"},
-        id="cpanel_stats_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=120,
-    )
-
-    # ── CPANEL security (cPHulk) — cada 15 minutos (offset +5 min) ──────────
-    scheduler.add_job(
-        execute_job, trigger="interval", minutes=15,
-        args=["cpanel"], kwargs={"mode": "security"},
-        id="cpanel_security_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=120,
-        start_date=now.replace(minute=(now.minute + 5) % 60),
-    )
-
-    # ── CPANEL accounts — cada hora ──────────────────────────────────────────
-    scheduler.add_job(
-        execute_job, trigger="interval", hours=1,
-        args=["cpanel"], kwargs={"mode": "accounts"},
-        id="cpanel_accounts_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=300,
-    )
-
-    # ── CPANEL logs Exim (SSH) — cada 30 minutos ─────────────────────────────
-    scheduler.add_job(
-        execute_job, trigger="interval", minutes=30,
-        args=["cpanel"], kwargs={"mode": "logs"},
-        id="cpanel_logs_job", replace_existing=True,
-        max_instances=1, coalesce=True, misfire_grace_time=300,
+        sync_job_schedules, trigger="interval", seconds=30,
+        args=[scheduler],
+        id="config_watcher_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 
     # ── MOTOR DE ALERTAS — cada 5 minutos ────────────────────────────────────
@@ -224,22 +208,18 @@ def main() -> None:
     print("=" * 55)
     print("  SOC Platform — Scheduler de Recolección")
     print("=" * 55)
-    print("  Módulo              Frecuencia")
-    print("  ──────────────────────────────────────")
-    print("  Sentinel            cada 5 minutos")
-    print("  Fortinet config     cada 15 minutos")
-    print("  Fortinet logs       cada 15 minutos")
-    print("  Fortinet threats    cada 5 minutos")
-    print("  Nmap quick          cada 6 horas")
-    print("  Nmap deep           domingos 02:00")
-    print("  Snyk                diario 01:00")
-    print("  cPanel stats        cada 15 minutos")
-    print("  cPanel security     cada 15 minutos")
-    print("  cPanel accounts     cada hora")
-    print("  cPanel logs (SSH)   cada 30 minutos")
-    print("  Motor de alertas    cada 5 minutos")
-    print("  Limpieza de datos   diaria 03:00")
+    print("  Job                          Config actual")
+    print("  ──────────────────────────────────────────")
+    for jd in JOB_DEFINITIONS:
+        row    = schedules[jd["job_id"]]
+        estado = "" if row["enabled"] else " (desactivado)"
+        valor  = f"{row['schedule_type']}={row['schedule_value']}{estado}"
+        print(f"  {jd['label']:<28} {valor}")
+    print("  Motor de alertas             cada 5 minutos")
+    print("  Limpieza de datos            diaria 03:00")
     print("=" * 55)
+    print("  Los intervalos de arriba se pueden cambiar en caliente")
+    print("  desde el panel de configuración (config_watcher_job, cada 30s)")
     print("  Ctrl+C para detener\n")
 
     scheduler.start()

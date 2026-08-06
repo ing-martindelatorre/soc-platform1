@@ -1108,6 +1108,27 @@ class SOCHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
 
+        elif path == "/api/config/schedules":
+            if not self._require_auth():
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT * FROM job_config ORDER BY job_name")
+                        schedules = [dict(r) for r in cur.fetchall()]
+                        cur.execute("SELECT * FROM v_job_runs_latest")
+                        runs_by_module = {r["job_name"]: dict(r) for r in cur.fetchall()}
+                # job_runs se registra por módulo (sentinel/fortinet/nmap/snyk/cpanel),
+                # no por job_id de APScheduler, así que jobs del mismo módulo
+                # (ej. fortinet_config_job/fortinet_logs_job/fortinet_threats_job)
+                # comparten la misma "última corrida" del módulo.
+                for s in schedules:
+                    module = s["job_name"].split("_")[0]
+                    s["last_run"] = runs_by_module.get(module)
+                self._send_json({"ok": True, "schedules": schedules})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
         elif path == "/api/config/alert-log":
             if not self._require_auth():
                 return
@@ -1276,6 +1297,23 @@ class SOCHandler(SimpleHTTPRequestHandler):
                             return
                     conn.commit()
                 self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+        elif path.startswith("/api/config/schedules/"):
+            job_id = path.split("/")[-1]
+            body   = self._read_body()
+            try:
+                sys.path.insert(0, str(BASE_DIR.parent))
+                from app.pipeline.job_config import update_schedule
+                update_schedule(
+                    job_id,
+                    str(body.get("schedule_type", "")).strip(),
+                    str(body.get("schedule_value", "")).strip(),
+                    bool(body.get("enabled", True)),
+                )
+                self._send_json({"ok": True})
+            except ValueError as e:
+                self._send_json({"ok": False, "error": str(e)}, 400)
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
         else:

@@ -192,6 +192,16 @@
 
     .field-hint { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); }
 
+    /* ── INPUTS SUELTOS (tabla de frecuencias) ───────────────────────────── */
+    .sched-input, .sched-select {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 8px;
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      color: var(--text); outline: none; transition: border-color 0.2s;
+    }
+    .sched-input:focus, .sched-select:focus { border-color: var(--accent); }
+    .sched-input { width: 70px; }
+
     /* ── BUTTONS ──────────────────────────────────────────────────────────── */
     .btn {
       font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
@@ -315,6 +325,7 @@
       <button class="nav-tab" onclick="newRule()">+ Nueva Regla</button>
       <button class="nav-tab" onclick="showTab('log')">Historial de Alertas</button>
       <button class="nav-tab" onclick="showTab('smtp')">Configuración SMTP</button>
+      <button class="nav-tab" onclick="showTab('schedules')">Frecuencias de Recolección</button>
     </div>
 
     <!-- ── TAB: REGLAS ──────────────────────────────────────────────────── -->
@@ -483,6 +494,36 @@
       </div>
     </div>
 
+    <!-- ── TAB: FRECUENCIAS DE RECOLECCIÓN ─────────────────────────────────── -->
+    <div class="tab-pane" id="tab-schedules">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Frecuencias de recolección</div>
+        </div>
+        <p style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);margin-bottom:16px">
+          Cada cuánto se consulta la API de cada herramienta y se escribe el resultado en la base de datos
+          (son la misma operación). Los cambios se aplican en caliente, sin reiniciar el scheduler
+          (tardan hasta 30s en tomar efecto).
+        </p>
+        <div class="table-wrap">
+          <table id="schedules-table">
+            <thead>
+              <tr>
+                <th>Job</th>
+                <th>Frecuencia</th>
+                <th>Última corrida</th>
+                <th>Activo</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="schedules-body">
+              <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">⏱</div>Cargando frecuencias...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -534,6 +575,7 @@ function showApp() {
   document.getElementById('app').style.display = 'block';
   loadRules();
   loadLog();
+  loadSchedules();
 }
 
 // Verificar sesión al cargar
@@ -552,7 +594,7 @@ function showTab(name) {
   document.querySelectorAll('.tab-pane').forEach(p => p.className = 'tab-pane');
   document.querySelectorAll('.nav-tab').forEach(t => t.className = 'nav-tab');
   document.getElementById('tab-' + name).className = 'tab-pane active';
-  const tabs = ['rules','new-rule','log','smtp'];
+  const tabs = ['rules','new-rule','log','smtp','schedules'];
   document.querySelectorAll('.nav-tab')[tabs.indexOf(name)].className = 'nav-tab active';
 }
 
@@ -791,6 +833,127 @@ async function deleteRule(id, name) {
     loadRules();
   } catch(e) {
     showToast('Error al eliminar', 'error');
+  }
+}
+
+// ─── FRECUENCIAS DE RECOLECCIÓN ─────────────────────────────────────────────────
+let _schedulesCache = [];
+const DOW_LABELS = { '*': 'Diario', 'sun': 'Domingo', 'mon': 'Lunes', 'tue': 'Martes', 'wed': 'Miércoles', 'thu': 'Jueves', 'fri': 'Viernes', 'sat': 'Sábado' };
+
+function parseCron(value) {
+  const parts = String(value || '0 0 * * *').trim().split(/\s+/);
+  return { minute: parts[0] ?? '0', hour: parts[1] ?? '0', dow: parts[4] ?? '*' };
+}
+
+function formatLastRun(lastRun) {
+  if (!lastRun || !lastRun.started_at) {
+    return '<span style="color:var(--muted)">— sin corridas —</span>';
+  }
+  const statusColor = { success: 'badge-green', failed: 'badge-red', running: 'badge-blue' }[lastRun.status] || 'badge-blue';
+  const when = new Date(lastRun.started_at).toLocaleString('es-MX');
+  return `<span class="badge ${statusColor}">${lastRun.status}</span> <span style="color:var(--muted)">${when}</span>`;
+}
+
+async function loadSchedules() {
+  try {
+    const res  = await fetch('/api/config/schedules', { headers: authHeaders() });
+    const data = await res.json();
+    _schedulesCache = data.schedules || [];
+    renderSchedules(_schedulesCache);
+  } catch(e) {
+    document.getElementById('schedules-body').innerHTML =
+      '<tr><td colspan="5"><div class="empty-state">Error cargando frecuencias.</div></td></tr>';
+  }
+}
+
+function renderSchedules(schedules) {
+  const tbody = document.getElementById('schedules-body');
+  if (!schedules.length) {
+    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state">Sin jobs configurados.</div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = schedules.map(s => {
+    const jobId = s.job_name;
+    let freqInput;
+    if (s.schedule_type === 'interval') {
+      freqInput = `<input type="number" min="1" class="sched-input" id="sched-val-${jobId}" value="${s.schedule_value}"/> minutos`;
+    } else {
+      const c = parseCron(s.schedule_value);
+      const dowOptions = Object.entries(DOW_LABELS).map(([k, label]) =>
+        `<option value="${k}" ${k === c.dow ? 'selected' : ''}>${label}</option>`).join('');
+      freqInput = `
+        <select class="sched-select" id="sched-dow-${jobId}">${dowOptions}</select>
+        <input type="number" min="0" max="23" class="sched-input" style="width:44px" id="sched-hour-${jobId}" value="${c.hour}"/>:
+        <input type="number" min="0" max="59" class="sched-input" style="width:44px" id="sched-min-${jobId}" value="${c.minute}"/>
+      `;
+    }
+    return `
+      <tr>
+        <td>${s.label || jobId}</td>
+        <td>${freqInput}</td>
+        <td>${formatLastRun(s.last_run)}</td>
+        <td>
+          <label class="toggle">
+            <input type="checkbox" id="sched-enabled-${jobId}" ${s.enabled ? 'checked' : ''} onchange="toggleSchedule('${jobId}', this.checked)"/>
+            <span class="toggle-slider"></span>
+          </label>
+        </td>
+        <td><button class="btn btn-accent" onclick="saveSchedule('${jobId}', '${s.schedule_type}')">Guardar</button></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function buildScheduleValue(jobId, scheduleType) {
+  if (scheduleType === 'interval') {
+    return document.getElementById(`sched-val-${jobId}`).value.trim();
+  }
+  const dow    = document.getElementById(`sched-dow-${jobId}`).value;
+  const hour   = document.getElementById(`sched-hour-${jobId}`).value;
+  const minute = document.getElementById(`sched-min-${jobId}`).value;
+  return `${minute} ${hour} * * ${dow}`;
+}
+
+async function putSchedule(jobId, scheduleType, scheduleValue, enabled) {
+  const res  = await fetch(`/api/config/schedules/${jobId}`, {
+    method: 'PUT', headers: authHeaders(),
+    body: JSON.stringify({ schedule_type: scheduleType, schedule_value: scheduleValue, enabled }),
+  });
+  return res.json();
+}
+
+async function saveSchedule(jobId, scheduleType) {
+  const enabled       = document.getElementById(`sched-enabled-${jobId}`).checked;
+  const scheduleValue = buildScheduleValue(jobId, scheduleType);
+  try {
+    const data = await putSchedule(jobId, scheduleType, scheduleValue, enabled);
+    if (data.ok) {
+      showToast('Frecuencia actualizada — se aplica en caliente (hasta 30s)');
+      loadSchedules();
+    } else {
+      showToast(data.error || 'Error al guardar', 'error');
+    }
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  }
+}
+
+async function toggleSchedule(jobId, enabled) {
+  const row = _schedulesCache.find(s => s.job_name === jobId);
+  if (!row) return;
+  try {
+    const data = await putSchedule(jobId, row.schedule_type, row.schedule_value, enabled);
+    if (data.ok) {
+      showToast(enabled ? 'Job activado' : 'Job desactivado');
+      row.enabled = enabled;
+    } else {
+      showToast(data.error || 'Error al actualizar', 'error');
+      document.getElementById(`sched-enabled-${jobId}`).checked = !enabled;
+    }
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+    document.getElementById(`sched-enabled-${jobId}`).checked = !enabled;
   }
 }
 
