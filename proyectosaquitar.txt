@@ -1,0 +1,3 @@
+/home/zidane/soc-platform1/data/repos/logistica   -> Ya no existe
+/home/zidane/soc-platform1/data/repos/ubicacionesCH -> No se dio seguimiento y quedo en desarrollo
+/home/zidane/soc-platform1/data/repos/franquiciasKotlin -> Se cancelo el desarrollo 
