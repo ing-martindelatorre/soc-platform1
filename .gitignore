@@ -9,3 +9,9 @@ __pycache__/
 *.pyc
 data/
 result.txt
+
+# Datos generados o sensibles (no versionar)
+dashboard/*_output.html
+dashboard/fortinet_dashboard_*.html
+virus_bloqueados_*.csv
+targets_nmap_batch.txt

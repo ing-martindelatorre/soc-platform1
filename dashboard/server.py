@@ -1380,24 +1380,6 @@ def start_http_server():
 
 
 # =============================================================================
-# MOTOR DE ALERTAS
-# =============================================================================
-def run_alert_engine():
-    """Evalúa reglas de alerta cada 5 minutos y envía emails si aplica."""
-    time.sleep(30)
-    while True:
-        try:
-            sys.path.insert(0, str(BASE_DIR.parent))
-            from app.alerts.engine import evaluate_and_send
-            sent = evaluate_and_send()
-            if sent > 0:
-                print(f"[alerts] {sent} alerta(s) enviada(s) | {now_str()}")
-        except Exception as e:
-            print(f"[alerts] ERROR: {e}")
-        time.sleep(300)
-
-
-# =============================================================================
 # MAIN
 # =============================================================================
 def main():
@@ -1450,7 +1432,6 @@ def main():
         threading.Thread(target=refresh_snyk,             daemon=True, name="snyk"),
         threading.Thread(target=refresh_cpanel,           daemon=True, name="cpanel"),
         threading.Thread(target=refresh_index_status,     daemon=True, name="index-status"),
-        threading.Thread(target=run_alert_engine,         daemon=True, name="alert-engine"),
         threading.Thread(target=start_http_server,        daemon=True, name="http"),
     ]
 

@@ -136,6 +136,16 @@ def execute_job(job_name: str, **kwargs) -> None:
     try:
         result  = run_pipeline(job_name, **kwargs)
         elapsed = (datetime.now(timezone.utc) - started).seconds
+
+        # Varios módulos (Fortinet, cPanel, Nmap y los _Fallback del registry)
+        # capturan sus errores y devuelven ok=False en lugar de lanzar
+        # excepción; sin este chequeo quedarían registrados como "success".
+        if result.get("ok") is False:
+            detalle = result.get("error") or str(result)
+            register_job_end(run_id, "failed", str(result)[:5000])
+            print(f"[ERROR] {job_name} | {elapsed}s | {str(detalle)[:300]}")
+            return
+
         register_job_end(run_id, "success", str(result)[:5000])
         print(f"[OK] {job_name} | {elapsed}s | {result.get('message', '')}")
 

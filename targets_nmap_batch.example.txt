@@ -1,0 +1,12 @@
+# Copia este archivo a targets_nmap_batch.txt y ajusta tus targets.
+# Formato: nombre|target|perfil|enabled
+# Perfiles: quick | full_tcp | perimeter (requiere root) | vuln
+# enabled: true | false
+
+# Producción
+fw-principal|192.0.2.10|perimeter|true
+web-publico|www.ejemplo.com|vuln|true
+
+# Red interna
+host-1|192.0.2.21|quick|true
+host-2|192.0.2.22|quick|false
