@@ -99,6 +99,13 @@ def clone_or_pull(repo: dict, token: str, repos_dir: Path) -> dict:
 
     try:
         if repo_path.exists() and (repo_path / ".git").exists():
+            # Refrescar el token del remote: si GITHUB_ORG_TOKEN se rotó, el
+            # pull con la URL guardada en el clon falla con 401.
+            subprocess.run(
+                ["git", "remote", "set-url", "origin", auth_url],
+                cwd=str(repo_path),
+                capture_output=True, text=True, timeout=30,
+            )
             result = subprocess.run(
                 ["git", "pull", "--ff-only"],
                 cwd=str(repo_path),
