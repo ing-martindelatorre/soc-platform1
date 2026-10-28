@@ -326,6 +326,7 @@
       <button class="nav-tab" onclick="showTab('log')">Historial de Alertas</button>
       <button class="nav-tab" onclick="showTab('smtp')">Configuración SMTP</button>
       <button class="nav-tab" onclick="showTab('schedules')">Frecuencias de Recolección</button>
+      <button class="nav-tab" onclick="showTab('replication')">Replicación remota</button>
     </div>
 
     <!-- ── TAB: REGLAS ──────────────────────────────────────────────────── -->
@@ -524,6 +525,73 @@
       </div>
     </div>
 
+    <!-- ── TAB: REPLICACIÓN REMOTA ──────────────────────────────────────── -->
+    <div class="tab-pane" id="tab-replication">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Destinos de replicación</div>
+          <button class="btn btn-accent" onclick="newReplicationTarget()">+ Nuevo destino</button>
+        </div>
+        <p style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);margin-bottom:16px">
+          Cada destino recibe, cifrado con AES-256-GCM, lo nuevo de las tablas seleccionadas
+          (la llave <strong style="color:var(--accent)">REPLICATION_ENC_KEY</strong> se define en
+          <strong style="color:var(--accent)">.env</strong> y debe coincidir con la del receptor
+          en la otra ubicación). El intervalo de envío se ajusta en la pestaña
+          "Frecuencias de Recolección" (job <strong style="color:var(--accent)">Replicación remota</strong>).
+        </p>
+        <div class="table-wrap">
+          <table id="replication-table">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Destino</th>
+                <th>Tablas</th>
+                <th>Última actividad</th>
+                <th>Activo</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="replication-body">
+              <tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🔁</div>Cargando destinos...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="replication-form-panel" style="display:none">
+        <div class="panel-title" id="replication-form-title">Nuevo destino de replicación</div>
+        <div style="margin-top:20px">
+          <div class="form-grid three">
+            <div class="field">
+              <label>Nombre</label>
+              <input type="text" id="rep-name" placeholder="Ej: Oficina remota"/>
+            </div>
+            <div class="field">
+              <label>Host / IP</label>
+              <input type="text" id="rep-host" placeholder="203.0.113.10"/>
+            </div>
+            <div class="field">
+              <label>Puerto</label>
+              <input type="number" id="rep-port" placeholder="9443" min="1" max="65535"/>
+            </div>
+            <div class="field form-full">
+              <label>Fingerprint TLS del receptor (opcional — SHA-256 hex, para pinning)</label>
+              <input type="text" id="rep-fingerprint" placeholder="Vacío = valida contra CA pública"/>
+              <span class="field-hint">Fija el certificado esperado en vez de confiar en una CA — recomendado entre dos máquinas propias</span>
+            </div>
+            <div class="field form-full">
+              <label>Tablas a replicar (ninguna marcada = todas)</label>
+              <div id="rep-tables-list" style="display:flex;flex-wrap:wrap;gap:12px;font-family:'JetBrains Mono',monospace;font-size:12px"></div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-muted" onclick="cancelReplicationForm()">Cancelar</button>
+            <button class="btn btn-green" id="btn-save-replication" onclick="saveReplicationTarget()">Guardar destino</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -544,8 +612,13 @@ function doLogin() {
   .then(r => r.json())
   .then(data => {
     if (data.ok) {
+      // La cookie de sesión (HttpOnly) la fija el servidor en la respuesta
       sessionStorage.setItem(SESSION_KEY, data.token);
-      document.cookie = 'soc_session=' + data.token + '; path=/; SameSite=Strict';
+      const next = new URLSearchParams(location.search).get('next');
+      if (next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/config.html')) {
+        location.href = next;
+        return;
+      }
       showApp();
     } else {
       document.getElementById('login-error').style.display = 'block';
@@ -557,8 +630,12 @@ function doLogin() {
 }
 
 function doLogout() {
+  fetch('/api/config/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
+  showLogin();
+}
+
+function showLogin() {
   sessionStorage.removeItem(SESSION_KEY);
-  document.cookie = 'soc_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Strict';
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('login-pass').value = '';
@@ -576,12 +653,26 @@ function showApp() {
   loadRules();
   loadLog();
   loadSchedules();
+  loadReplicationTables();
+  loadReplicationTargets();
 }
 
 // Verificar sesión al cargar
+// Si cualquier llamada a la API devuelve 401 (sesión expirada o servidor reiniciado),
+// volver al login en vez de dejar el panel vacío
+const _origFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const res = await _origFetch(...args);
+  const url = String(args[0] && args[0].url || args[0]);
+  if (res.status === 401 && !url.includes('/api/config/login')) showLogin();
+  return res;
+};
+
 window.addEventListener('load', () => {
-  const token = sessionStorage.getItem(SESSION_KEY);
-  if (token) showApp();
+  // Validar contra el servidor: el token de sessionStorage puede estar caducado
+  fetch('/api/config/session', { headers: authHeaders() })
+    .then(r => { if (r.ok) showApp(); })
+    .catch(() => {});
 
   // Enter en login
   document.getElementById('login-pass').addEventListener('keydown', e => {
@@ -594,7 +685,7 @@ function showTab(name) {
   document.querySelectorAll('.tab-pane').forEach(p => p.className = 'tab-pane');
   document.querySelectorAll('.nav-tab').forEach(t => t.className = 'nav-tab');
   document.getElementById('tab-' + name).className = 'tab-pane active';
-  const tabs = ['rules','new-rule','log','smtp','schedules'];
+  const tabs = ['rules','new-rule','log','smtp','schedules','replication'];
   document.querySelectorAll('.nav-tab')[tabs.indexOf(name)].className = 'nav-tab active';
 }
 
@@ -954,6 +1045,182 @@ async function toggleSchedule(jobId, enabled) {
   } catch(e) {
     showToast('Error de conexión', 'error');
     document.getElementById(`sched-enabled-${jobId}`).checked = !enabled;
+  }
+}
+
+// ─── REPLICACIÓN REMOTA ─────────────────────────────────────────────────────
+let _replicationCache = [];
+let _replicationTablesCache = [];
+let _editReplicationId = null;
+
+async function loadReplicationTables() {
+  try {
+    const res  = await fetch('/api/config/replication-tables', { headers: authHeaders() });
+    const data = await res.json();
+    _replicationTablesCache = data.tables || [];
+  } catch(e) {
+    console.error('Error cargando tablas replicables:', e);
+  }
+}
+
+async function loadReplicationTargets() {
+  try {
+    const res  = await fetch('/api/config/replication-targets', { headers: authHeaders() });
+    const data = await res.json();
+    _replicationCache = data.targets || [];
+    renderReplicationTargets(_replicationCache);
+  } catch(e) {
+    document.getElementById('replication-body').innerHTML =
+      '<tr><td colspan="6"><div class="empty-state">Error cargando destinos.</div></td></tr>';
+  }
+}
+
+function lastReplicationActivity(target) {
+  const wms = target.watermarks || [];
+  if (!wms.length) return '<span style="color:var(--muted)">— sin actividad —</span>';
+  const latest = wms.reduce((a, b) => new Date(a.updated_at) > new Date(b.updated_at) ? a : b);
+  return `<span style="color:var(--muted)">${new Date(latest.updated_at).toLocaleString('es-MX')}</span>`;
+}
+
+function renderReplicationTargets(targets) {
+  const tbody = document.getElementById('replication-body');
+  if (!targets.length) {
+    tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🔁</div>No hay destinos configurados.<br/>Crea uno para empezar a replicar.</div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = targets.map(t => {
+    const tables = (t.tables && t.tables.length) ? t.tables.join(', ') : 'Todas';
+    return `
+    <tr>
+      <td><strong>${esc(t.name)}</strong></td>
+      <td style="color:var(--accent)">${esc(t.host)}:${t.port}</td>
+      <td style="color:var(--muted)">${esc(tables)}</td>
+      <td>${lastReplicationActivity(t)}</td>
+      <td>
+        <label class="toggle">
+          <input type="checkbox" ${t.enabled ? 'checked' : ''} onchange="toggleReplicationTarget(${t.id}, this.checked)"/>
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-muted" style="padding:5px 12px;font-size:10px" onclick="testReplicationTarget(${t.id})">Probar conexión</button>
+        <button class="btn btn-muted" style="padding:5px 12px;font-size:10px" onclick="editReplicationTarget(${t.id})">Editar</button>
+        <button class="btn btn-red"   style="padding:5px 12px;font-size:10px" onclick="deleteReplicationTarget(${t.id}, '${esc(t.name)}')">Eliminar</button>
+      </td>
+    </tr>
+  `;
+  }).join('');
+}
+
+function renderReplicationTablesCheckboxes(selected) {
+  const wrap = document.getElementById('rep-tables-list');
+  const sel  = new Set(selected || []);
+  wrap.innerHTML = _replicationTablesCache.map(t => `
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" class="rep-table-cb" value="${t.table}" ${sel.has(t.table) ? 'checked' : ''}/>
+      ${esc(t.label)}
+    </label>
+  `).join('');
+}
+
+function newReplicationTarget() {
+  _editReplicationId = null;
+  document.getElementById('rep-name').value = '';
+  document.getElementById('rep-host').value = '';
+  document.getElementById('rep-port').value = '';
+  document.getElementById('rep-fingerprint').value = '';
+  renderReplicationTablesCheckboxes([]);
+  document.getElementById('replication-form-title').textContent = 'Nuevo destino de replicación';
+  document.getElementById('btn-save-replication').textContent = 'Guardar destino';
+  document.getElementById('replication-form-panel').style.display = '';
+}
+
+function editReplicationTarget(id) {
+  const target = _replicationCache.find(t => t.id === id);
+  if (!target) return;
+
+  _editReplicationId = id;
+  document.getElementById('rep-name').value = target.name || '';
+  document.getElementById('rep-host').value = target.host || '';
+  document.getElementById('rep-port').value = target.port || '';
+  document.getElementById('rep-fingerprint').value = target.tls_fingerprint || '';
+  renderReplicationTablesCheckboxes(target.tables || []);
+  document.getElementById('replication-form-title').textContent = 'Editar destino de replicación';
+  document.getElementById('btn-save-replication').textContent = 'Guardar cambios';
+  document.getElementById('replication-form-panel').style.display = '';
+}
+
+function cancelReplicationForm() {
+  _editReplicationId = null;
+  document.getElementById('replication-form-panel').style.display = 'none';
+}
+
+async function saveReplicationTarget() {
+  const name        = document.getElementById('rep-name').value.trim();
+  const host        = document.getElementById('rep-host').value.trim();
+  const port        = parseInt(document.getElementById('rep-port').value);
+  const fingerprint = document.getElementById('rep-fingerprint').value.trim();
+  const tables      = Array.from(document.querySelectorAll('.rep-table-cb:checked')).map(cb => cb.value);
+
+  if (!name || !host || !port) {
+    showToast('Completa nombre, host y puerto', 'error');
+    return;
+  }
+
+  const payload = { name, host, port, tables, tls_fingerprint: fingerprint };
+  const isEdit  = _editReplicationId !== null;
+  const url     = isEdit ? `/api/config/replication-targets/${_editReplicationId}` : '/api/config/replication-targets';
+  const method  = isEdit ? 'PUT' : 'POST';
+
+  try {
+    const res  = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(isEdit ? 'Destino actualizado correctamente' : 'Destino creado correctamente');
+      cancelReplicationForm();
+      loadReplicationTargets();
+    } else {
+      showToast(data.error || 'Error al guardar', 'error');
+    }
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  }
+}
+
+async function toggleReplicationTarget(id, enabled) {
+  try {
+    const res  = await fetch(`/api/config/replication-targets/${id}`, {
+      method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ enabled }),
+    });
+    const data = await res.json();
+    showToast(
+      data.ok ? (enabled ? 'Destino activado' : 'Destino desactivado') : (data.error || 'Error al actualizar'),
+      data.ok ? 'success' : 'error'
+    );
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  }
+}
+
+async function deleteReplicationTarget(id, name) {
+  if (!confirm(`¿Eliminar el destino "${name}"? También se pierde su historial de avance (watermarks).`)) return;
+  try {
+    await fetch(`/api/config/replication-targets/${id}`, { method: 'DELETE', headers: authHeaders() });
+    showToast('Destino eliminado');
+    loadReplicationTargets();
+  } catch(e) {
+    showToast('Error al eliminar', 'error');
+  }
+}
+
+async function testReplicationTarget(id) {
+  showToast('Probando conexión...', 'success');
+  try {
+    const res  = await fetch(`/api/config/replication-targets/${id}/test`, { method: 'POST', headers: authHeaders() });
+    const data = await res.json();
+    showToast(data.ok ? (data.message || 'Conexión exitosa') : (data.error || 'Error de conexión'), data.ok ? 'success' : 'error');
+  } catch(e) {
+    showToast('Error de conexión', 'error');
   }
 }
 

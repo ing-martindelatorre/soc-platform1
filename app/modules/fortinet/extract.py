@@ -212,7 +212,7 @@ def extract_logs(device_id: int = 1, **kwargs) -> Dict[str, Any]:
             f"FORTI_{device_id}_API_TOKEN no configurados en .env"
         )
 
-    endpoint  = kwargs.get("endpoint") or "/api/v2/log/disk/traffic/forward/system"
+    endpoint  = kwargs.get("endpoint") or "/api/v2/log/memory/traffic/forward"
     limit     = int(kwargs.get("limit") or 100)
     date_from = kwargs.get("date_from")
     date_to   = kwargs.get("date_to")

@@ -34,11 +34,17 @@ repositorios.
 
 Flujo completo:
 
-1. `python -m app.pipeline.sync_repos` lista los repos de GitHub con
-   `GITHUB_ORG_TOKEN`, aplica `SNYK_EXCLUDE_REPOS` y `SNYK_MAX_REPOS`, clona
-   (`--depth=1`) o hace `git pull --ff-only` en `SNYK_REPOS_DIR`, y
-   **reescribe `repos_snyk_batch.txt`** con las rutas clonadas.
-2. El scheduler ejecuta `snyk_job`. El registry lee `repos_snyk_batch.txt`
+1. `python -m app.pipeline.sync_repos` lee las custom properties de la org
+   (`GET /orgs/{org}/properties/values`) y se queda solo con los repos cuya
+   propiedad `ambiente` vale `produccion` (constantes `SCOPE_PROPERTY` /
+   `SCOPE_VALUE`). Los repos en `desarrollo`, `descontinuado` o sin valor no
+   se escanean; el scope se cambia etiquetando el repo en GitHub, no con
+   listas locales. Clona (`--depth=1`) o hace `git pull --ff-only` en
+   `SNYK_REPOS_DIR` y **reescribe `repos_snyk_batch.txt`** con las rutas
+   clonadas. Si ningún repo está en producción aborta sin tocar el batch.
+2. El scheduler ejecuta `snyk_job`. El registry primero corre `sync_repos`
+   (si falla, registra un warning y usa el batch anterior) y luego lee
+   `repos_snyk_batch.txt`
    (una ruta por línea, `#` para comentarios) y llama a
    `run_snyk_scan_for_repos`.
 3. Para cada repo, `pick_available_account` elige una cuenta habilitada y no
@@ -112,7 +118,7 @@ que tengan URL y token (`FORTI_1_*` a `FORTI_5_*`).
 | Modo | Endpoints (API v2) | Destino |
 |---|---|---|
 | `config` | `monitor/system/status`, `monitor/system/ha-status`, `cmdb/system/interface`, `cmdb/firewall/address`, `cmdb/firewall/policy`, `cmdb/router/static`, `cmdb/system/admin` | `fortinet_raw_snapshots` |
-| `logs` | un endpoint de log en disco, por defecto `/api/v2/log/disk/traffic/forward/system` (cámbialo con `--endpoint`) | `fortinet_log_raw` |
+| `logs` | un endpoint de log en memoria, por defecto `/api/v2/log/memory/traffic/forward` (cámbialo con `--endpoint`; los equipos no tienen log en disco) | `fortinet_log_raw` |
 | `threats` | logs en memoria: `traffic/forward`, `event/system`, `webfilter`, `event/vpn`, `ips`, `virus`; más el inventario `monitor/user/device/query` | `fortinet_threats` |
 
 **Clasificación** (`transform.py`): `traffic` → `blocked` / `suspicious` /

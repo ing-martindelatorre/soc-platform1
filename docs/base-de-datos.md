@@ -127,10 +127,11 @@ días se configuran con variables de entorno.
 | `nmap_findings` | `created_at` | `RETENTION_NMAP_DAYS` | 90 |
 | `nmap_assets` | `last_seen` | `RETENTION_NMAP_ASSETS_DAYS` | 180 |
 | `fortinet_threats` | `collected_at` | `RETENTION_FORTINET_DAYS` | 365 |
+| `fortinet_log_raw` | `collected_at` | `RETENTION_FORTINET_DAYS` | 60 |
 | `job_runs` | `started_at` | `RETENTION_JOB_RUNS_DAYS` | 30 |
 | `alert_log` | `sent_at` | `RETENTION_ALERT_LOG_DAYS` | 365 |
 
-No hay política para `fortinet_raw_snapshots`, `fortinet_log_raw`, las tablas
+No hay política para `fortinet_raw_snapshots`, las tablas
 `cpanel_*` ni `ip_reputation_cache`: crecen sin límite (ver
 [problemas-conocidos.md](problemas-conocidos.md)).
 

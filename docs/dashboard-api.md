@@ -20,7 +20,7 @@ HTTP y muestra una advertencia al arrancar.
 | `nmap_dashboard_output.html` | Activos, servicios y hallazgos (generado desde `nmap_dashboard.html`) |
 | `fortinet_dashboard_output.html` y `fortinet_dashboard_<equipo>.html` | Configuración y políticas por FortiGate |
 | `fortinet_threats_dashboard.html` | Amenazas: tráfico, eventos, webfilter, IPS, VPN y antivirus (`?device=<equipo>`; 24 h y 7 d) |
-| `snyk_dashboard.html` | Vulnerabilidades por repositorio y aplicación, con descarte |
+| `snyk_dashboard.html` | Vulnerabilidades por repositorio y aplicación, con descarte. Solo muestra los repos en scope (`ambiente=produccion`, leídos de `repos_snyk_batch.txt`); los hallazgos de repos fuera de scope siguen en BD pero no se muestran. El resumen por proyecto y el detalle por aplicación listan siempre todos los repos en scope con un estado (`con hallazgos`, `limpio` con ceros, `pending` si nunca se ha escaneado, `error`, `sin proyecto soportado`) calculado del último registro en `snyk_scan_runs` |
 | `cpanel_dashboard.html` | Estado del servidor, correo, spam y virus, cuentas |
 | `config.html` | Login y panel de configuración (reglas, intervalos, log de alertas) |
 
@@ -56,22 +56,29 @@ espacios y guiones (`San Martin` → `san_martin`).
 - El acceso lo controla `CONFIG_USER` y `CONFIG_PASSWORD`. **Si no están
   definidas, el login responde 503** y nada se puede usar.
 - `POST /api/config/login` con `{"username", "password"}` devuelve un token y
-  fija la cookie `soc_session` (`HttpOnly; SameSite=Strict; Path=/`). La sesión
-  dura 8 horas y vive en memoria: reiniciar el servidor cierra todas las
-  sesiones.
-- El token se acepta como cookie `soc_session` o como cabecera `X-SOC-Token`.
-- **Todas las páginas** (no solo la API) exigen sesión; sin ella, `GET`
-  responde `302` a `/config.html`. Solo `/config.html` y `/favicon.ico` son
-  públicos.
+  fija la cookie `soc_session_<DASHBOARD_PORT>` (`HttpOnly; SameSite=Strict;
+  Path=/; Max-Age=28800`). El puerto va en el nombre porque las cookies no se
+  aíslan por puerto: dos instancias en el mismo host con el mismo nombre de
+  cookie se cerraban la sesión mutuamente. La sesión dura 8 horas y vive en
+  memoria: reiniciar el servidor cierra todas las sesiones.
+- El token se acepta como cookie `soc_session_<puerto>` o como cabecera `X-SOC-Token`.
+- **Todas las páginas** (no solo la API) exigen sesión. Sin ella, un `GET` a
+  una página `.html` responde `302` a `/config.html?next=<ruta>` (tras el login
+  se vuelve a esa ruta) y un `GET` a datos (`*.json`, `*.csv`…) responde `401`,
+  que las páginas detectan para mandar al login. Solo `/config.html` y
+  `/favicon.ico` son públicos.
+- Todas las respuestas llevan `Cache-Control: no-store`.
 
 ## Endpoints
 
-Todos devuelven JSON `{"ok": true|false, …}`. Excepto `login`, exigen
+Todos devuelven JSON `{"ok": true|false, …}`. Excepto `login`, `logout` y `session`, exigen
 sesión (`401` si falta).
 
 | Método | Ruta | Descripción |
 |---|---|---|
 | POST | `/api/config/login` | Inicia sesión |
+| POST | `/api/config/logout` | Cierra la sesión y borra la cookie |
+| GET | `/api/config/session` | `200` si la sesión es válida, `401` si no |
 | GET | `/api/config/rules` | Lista reglas de alerta |
 | POST | `/api/config/rules` | Crea una regla |
 | PUT | `/api/config/rules/<id>` | Reemplaza una regla |

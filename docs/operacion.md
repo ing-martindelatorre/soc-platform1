@@ -93,12 +93,16 @@ python -c "from app.pipeline.runner import run_module; print(run_module('fortine
 ### Actualizar los repos y escanear con Snyk
 
 ```bash
+python -m app.pipeline.sync_repos --list-only  # repos con ambiente=produccion
 python -m app.pipeline.sync_repos            # clona o actualiza y regenera repos_snyk_batch.txt
 python -m app.pipeline.backfill_snyk --status   # estado de las cuentas Snyk
 python -m app.pipeline.backfill_snyk --repos-file repos_snyk_batch.txt
 ```
 
-Para excluir repos permanentemente usa `SNYK_EXCLUDE_REPOS` en el `.env`.
+El scope de Snyk lo define la custom property `ambiente` de cada repo en
+GitHub: solo se escanean los que valen `produccion`. Para meter o sacar un
+repo, cambia su propiedad en GitHub. `snyk_job` ejecuta `sync_repos` antes
+de cada escaneo.
 
 ### Aplicar una migración nueva
 
@@ -136,7 +140,7 @@ gunzip -c soc_2026-09-18.sql.gz | docker compose exec -T postgres psql -U "$DB_U
 | No llegan alertas | SMTP sin configurar, regla en cooldown o sin consulta para ese campo | Log `[alerts]`, `alert_log`, `SMTP_HOST` y `SMTP_USER` |
 | No llega ninguna alerta aunque el dashboard funciona | El scheduler no corre: es el único que evalúa reglas | `systemctl status soc-platform1` |
 | El panel responde 503 al iniciar sesión | Faltan `CONFIG_USER` o `CONFIG_PASSWORD` | `.env` del proceso del dashboard |
-| Todas las páginas redirigen a `/config.html` | No hay sesión activa | Iniciar sesión; las sesiones duran 8 h |
+| Todas las páginas redirigen a `/config.html` | No hay sesión activa (caducó a las 8 h o se reinició el dashboard) | Iniciar sesión de nuevo |
 | Snyk marca `skipped_quota_guard` | Todas las cuentas bloqueadas por cuota, límite o autenticación | `python -m app.pipeline.backfill_snyk --status` |
 | El intervalo del panel no se aplica | El scheduler no corre, o `job_id` desconocido | `journalctl -u soc-platform1`, líneas `[config]` |
 | Tráfico Fortinet demasiado ruidoso | Destinos legítimos no reconocidos | Ampliar `trusted_orgs.py` |

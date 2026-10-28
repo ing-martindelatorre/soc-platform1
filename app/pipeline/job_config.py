@@ -92,6 +92,12 @@ JOB_DEFINITIONS: list[dict] = [
         "label": "cPanel — Logs SSH",
         "default_schedule_type": "interval", "default_schedule_value": "30",
     },
+    {
+        "job_id": "replication_job", "args": ["replication"], "kwargs": {},
+        "misfire_grace_time": 120, "start_offset_minutes": 0,
+        "label": "Replicación remota",
+        "default_schedule_type": "interval", "default_schedule_value": "10",
+    },
 ]
 
 JOB_DEFINITIONS_BY_ID: dict[str, dict] = {jd["job_id"]: jd for jd in JOB_DEFINITIONS}

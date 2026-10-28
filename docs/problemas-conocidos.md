@@ -81,7 +81,7 @@ Fortinet devuelve `ok: False` si **falla cualquier equipo**, y Nmap si falla
 
 ### 6. Retención incompleta y duplicada
 
-- `fortinet_raw_snapshots`, `fortinet_log_raw`, `cpanel_*` e
+- `fortinet_raw_snapshots`, `cpanel_*` e
   `ip_reputation_cache` no tienen política de retención.
 - `dashboard/server.py` borra `fortinet_threats` de más de 1 año de forma fija
   (`cleanup_fortinet_threats`), en paralelo a `RETENTION_FORTINET_DAYS` del
@@ -119,8 +119,10 @@ soporta. El CLI también pasa `mode="config"` por defecto a todos los módulos.
 - `app/backfill_sentinel.py`: por el nombre parece de Sentinel, pero es un
   pipeline **legado de Snyk** (depende de `DATABASE_URL`, `extract_snyk_raw`…).
 - `app/pipeline/backfill_snyk.py`: útil, pero coexiste con el anterior.
-- `proyectosaquitar.txt`: notas de repos a excluir; ya existe
-  `SNYK_EXCLUDE_REPOS`.
+- `proyectosaquitar.txt`: notas de repos a excluir; obsoleto, el scope de
+  Snyk ahora sale de la custom property `ambiente=produccion` en GitHub.
+- `SNYK_EXCLUDE_REPOS` y `SNYK_MAX_REPOS`: ya no los usa `sync_repos.py`
+  (solo `app/backfill_sentinel.py`, legado, lee `SNYK_MAX_REPOS`).
 - Tablas `collector_runs` y `assets` (migración 001): sin uso en el código.
 - Migración 004: `job_config` original, reconstruida por la 025.
 - Variables `NMAP_DEFAULT_TARGETS` y `ZEEK_LOG_DIR`: declaradas y sin uso.

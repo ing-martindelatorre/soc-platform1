@@ -63,6 +63,40 @@
 
     .header-left h1 span { color: var(--accent); }
 
+    .scope-pill {
+      display: inline-block;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      margin-top: 10px;
+      border: 1px solid var(--green);
+      color: var(--green);
+      border-radius: 4px;
+    }
+
+    [hidden] { display: none !important; }
+
+    .state {
+      display: inline-block;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+    .state-vulnerable  { background: rgba(255,77,109,0.15); color: var(--red);    border: 1px solid rgba(255,77,109,0.3); }
+    .state-clean       { background: rgba(0,230,118,0.10);  color: var(--green);  border: 1px solid rgba(0,230,118,0.2); }
+    .state-pending     { background: rgba(189,147,249,0.12); color: var(--purple); border: 1px solid rgba(189,147,249,0.3); }
+    .state-unsupported { background: rgba(61,84,112,0.25);  color: var(--text);   border: 1px solid var(--border); }
+    .state-error       { background: rgba(255,140,66,0.15); color: var(--orange); border: 1px solid rgba(255,140,66,0.3); }
+    td.pending-cell    { color: var(--muted); }
+
     .header-left p {
       font-family: 'JetBrains Mono', monospace;
       font-size: 12px;
@@ -399,6 +433,7 @@
     <div class="header-left">
       <h1>SNYK <span>SECURITY</span> DASHBOARD</h1>
       <p id="ts">SOC Platform — cargando...</p>
+      <div class="scope-pill" id="scope-pill" hidden></div>
     </div>
     <div class="badge">Leviathan SOC</div>
   </div>
@@ -441,7 +476,7 @@
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Proyecto</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Total</th>
+          <th>Proyecto</th><th>Estado</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Total</th>
         </tr></thead>
         <tbody id="project-body"></tbody>
       </table>
@@ -477,6 +512,19 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = s || '';
   return d.innerHTML;
+}
+
+const STATE_LABELS = {
+  vulnerable:  'con hallazgos',
+  clean:       'limpio',
+  pending:     'pending',
+  unsupported: 'sin proyecto soportado',
+  error:       'error de escaneo',
+};
+
+function stateBadge(state, lastStatus, lastScanAt) {
+  const tip = (lastStatus || 'sin escanear') + (lastScanAt ? ' — ' + lastScanAt : '');
+  return `<span class="state state-${esc(state)}" title="${esc(tip).replace(/"/g, '&quot;')}">${esc(STATE_LABELS[state] || state)}</span>`;
 }
 
 function sevClass(s) {
@@ -530,6 +578,7 @@ function renderRepoBars(containerId, projects) {
 async function loadData() {
   try {
     const res  = await fetch(JSON_URL + '?t=' + Date.now());
+    if (res.status === 401) { location.href = '/config.html?next=' + encodeURIComponent(location.pathname + location.search); return; }
     const data = await res.json();
     render(data);
   } catch(e) {
@@ -548,7 +597,10 @@ function render(data) {
   const high     = sev.high     || 0;
   const medium   = sev.medium   || 0;
   const low      = sev.low      || 0;
-  const repos    = (data.top_projects || data.project_summary || []).length;
+  const scope    = data.scope || {};
+  const repos    = scope.total_repos != null
+    ? scope.total_repos
+    : (data.project_summary || data.top_projects || []).length;
   const dismissed = data.total_dismissed || 0;
 
   // KPIs
@@ -558,7 +610,7 @@ function render(data) {
     { label: 'High',            value: high,     cls: high > 0 ? 'orange' : '' },
     { label: 'Medium',          value: medium,   cls: 'yellow' },
     { label: 'Low',             value: low,      cls: 'green' },
-    { label: 'Repositorios',    value: repos,    cls: 'purple' },
+    { label: scope.label ? 'Repos en producción' : 'Repositorios', value: repos, cls: 'purple' },
     { label: 'SCA issues',      value: (data.scan_type || {}).sca || 0, cls: 'blue' },
     { label: 'Code issues',     value: (data.scan_type || {}).code || 0, cls: '' },
     { label: 'Revisadas',       value: dismissed, cls: 'green' },
@@ -571,6 +623,14 @@ function render(data) {
     </div>
   `).join('');
 
+  // Scope (custom property ambiente de GitHub)
+  const scopePill = document.getElementById('scope-pill');
+  if (scope.label) {
+    scopePill.textContent = `Ambiente: ${scope.label} · ${scope.total_repos} repos`;
+    scopePill.hidden = false;
+  } else {
+    scopePill.hidden = true;
+  }
   // Bars
   renderBars('sev-bars', sev);
   renderBars('sca-bars', scaSev);
@@ -592,27 +652,29 @@ function render(data) {
     `).join('');
   }
 
-  // Project summary table
+  // Project summary table: todos los repos en scope, con su estado
   const projBody = document.getElementById('project-body');
   const projects = data.project_summary || data.top_projects || [];
   if (!projects.length) {
-    projBody.innerHTML = '<tr><td colspan="6" class="empty">Sin datos</td></tr>';
+    projBody.innerHTML = '<tr><td colspan="7" class="empty">Sin datos</td></tr>';
   } else {
     projBody.innerHTML = projects.map(p => {
-      const name     = p.project_name || p.repo_name || '—';
-      const critical = p.critical || 0;
-      const high     = p.high     || 0;
-      const medium   = p.medium   || 0;
-      const low      = p.low      || 0;
-      const total    = p.total    || (critical + high + medium + low);
+      const name  = p.project_name || p.repo_name || '—';
+      const state = p.state || 'vulnerable';
+      // sin escaneo válido no hay conteos que mostrar
+      const noData = state === 'pending' || state === 'error' || state === 'unsupported';
+      const cell = (v, color) => noData
+        ? `<td class="pending-cell">—</td>`
+        : `<td style="color:${color}">${v || 0}</td>`;
       return `
         <tr>
           <td><span class="repo-pill">${esc(name)}</span></td>
-          <td style="color:var(--red)">${critical}</td>
-          <td style="color:var(--orange)">${high}</td>
-          <td style="color:var(--accent)">${medium}</td>
-          <td style="color:var(--green)">${low}</td>
-          <td style="color:#fff;font-weight:700">${total}</td>
+          <td>${stateBadge(state, p.last_status, p.last_scan_at)}</td>
+          ${cell(p.critical, 'var(--red)')}
+          ${cell(p.high, 'var(--orange)')}
+          ${cell(p.medium, 'var(--accent)')}
+          ${cell(p.low, 'var(--green)')}
+          ${noData ? '<td class="pending-cell">—</td>' : `<td style="color:#fff;font-weight:700">${p.total || 0}</td>`}
         </tr>
       `;
     }).join('');
@@ -662,9 +724,9 @@ function renderVulnByProject(groups) {
       <details class="vuln-group">
         <summary>
           <span class="app-name">${esc(g.project_name)}</span>
-          <span class="app-meta">${activeCount} activa(s) · ${dismissedCount} revisada(s)</span>
+          <span class="app-meta">${g.state && g.state !== 'vulnerable' ? stateBadge(g.state, g.last_status) + ' · ' : ''}${activeCount} activa(s) · ${dismissedCount} revisada(s)</span>
         </summary>
-        ${rows}
+        ${rows || `<div class="vuln-row"><span class="empty" style="grid-column:1/-1">${g.state === 'pending' ? 'Pendiente de escanear' : 'Sin vulnerabilidades'}</span></div>`}
       </details>
     `;
   }).join('');

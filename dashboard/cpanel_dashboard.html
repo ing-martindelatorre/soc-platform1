@@ -381,6 +381,7 @@ function render(data) {
 async function loadData() {
   try {
     const res = await fetch('cpanel_dashboard_data.json?t=' + Date.now());
+    if (res.status === 401) { location.href = '/config.html?next=' + encodeURIComponent(location.pathname + location.search); return; }
     if (!res.ok) {
       document.getElementById('status-badge').textContent = 'SIN DATOS';
       document.getElementById('recent-body').innerHTML = '<tr><td colspan="6" class="empty">Esperando primera recolección de logs (SSH)...</td></tr>';

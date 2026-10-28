@@ -47,12 +47,12 @@ Un valor "—" significa que no hay valor por defecto.
 | `SNYK_LOGS_DIR` | — | Logs (solo pipeline legado) |
 | `SNYK_TIMEOUT_SECONDS` | `900` | Timeout por repo (solo pipeline legado) |
 | `SNYK_REPOS_DIR` | `./data/repos` | Directorio donde `sync_repos.py` clona |
-| `SNYK_MAX_REPOS` | sin límite | Máximo de repos a procesar |
-| `SNYK_EXCLUDE_REPOS` | — | Repos a excluir, separados por coma |
+| `SNYK_MAX_REPOS` | sin límite | Solo pipeline legado; `sync_repos.py` ya no lo usa |
+| `SNYK_EXCLUDE_REPOS` | — | Sin uso: el scope sale de la custom property `ambiente=produccion` en GitHub |
 | `SNYK_SYNC_FROM_GITHUB` | `true` | Solo pipeline legado |
 | `SNYK_DASHBOARD_PORT` | `8010` | Puerto de `run_snyk_dashboard.py` en modo independiente |
 | `GITHUB_ORG` | — | Organización de GitHub (requerida por `sync_repos.py`) |
-| `GITHUB_ORG_TOKEN` | — | Token con permisos `repo` y `read:org` (requerida por `sync_repos.py`) |
+| `GITHUB_ORG_TOKEN` | — | Token con permisos `repo` y `read:org`, y lectura de custom properties de la org (requerida por `sync_repos.py`) |
 | `GH_CLONE_PROTOCOL` | `https` | Solo pipeline legado |
 
 ## FortiGate

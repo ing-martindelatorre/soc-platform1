@@ -19,6 +19,7 @@ from collections import Counter
 from datetime import datetime, timezone, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote
 
 try:
     from dotenv import load_dotenv
@@ -98,6 +99,10 @@ _status_lock = threading.Lock()
 # Sesiones del panel de configuración
 _sessions: dict[str, datetime] = {}
 SESSION_TTL_HOURS = 8
+
+# Nombre de cookie por instancia: las cookies no se aíslan por puerto, así que dos
+# dashboards en el mismo host (p.ej. 8888 y 8889) se pisaban la sesión mutuamente.
+SESSION_COOKIE = f"soc_session_{HTTP_PORT}"
 
 # Rutas que no requieren autenticación
 _PUBLIC_PATHS = frozenset({"/config.html", "/favicon.ico"})
@@ -736,15 +741,20 @@ def cleanup_fortinet_threats():
 # SNYK
 # =============================================================================
 def build_snyk_health() -> dict:
+    from dashboard.run_snyk_dashboard import load_scope_repos
+    # Solo repos en scope (ambiente=produccion); sin batch, todos
+    scope_repos = load_scope_repos()
+    where  = "WHERE repo_name = ANY(%s)" if scope_repos is not None else ""
+    params = (scope_repos,) if scope_repos is not None else ()
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT LOWER(COALESCE(severity,'unknown')) AS sev, COUNT(*) AS n
-                FROM snyk_findings GROUP BY 1
-            """)
+                FROM snyk_findings {where} GROUP BY 1
+            """, params)
             rows   = cur.fetchall()
             counts = {r["sev"]: int(r["n"]) for r in rows}
-            cur.execute("SELECT COUNT(*) AS n FROM snyk_findings")
+            cur.execute(f"SELECT COUNT(*) AS n FROM snyk_findings {where}", params)
             total = cur.fetchone()["n"]
     return {
         "critical": counts.get("critical", 0),
@@ -1011,12 +1021,17 @@ class SOCHandler(SimpleHTTPRequestHandler):
     def _cookie_token(self) -> str:
         for part in self.headers.get("Cookie", "").split(";"):
             part = part.strip()
-            if part.startswith("soc_session="):
-                return part[len("soc_session="):]
+            if part.startswith(SESSION_COOKIE + "="):
+                return part[len(SESSION_COOKIE) + 1:]
         return ""
 
     def _is_authenticated(self) -> bool:
         return _check_auth(self._get_token()) or _check_auth(self._cookie_token())
+
+    def end_headers(self):
+        # Sin caché: los HTML/JSON se regeneran cada pocos segundos y dependen de la sesión
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
 
     def _send_json(self, data: dict, status: int = 200, extra_headers: dict | None = None):
         body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
@@ -1058,8 +1073,13 @@ class SOCHandler(SimpleHTTPRequestHandler):
 
         path_clean = self.path.split("?")[0].split("#")[0]
         if path_clean not in _PUBLIC_PATHS and not self._is_authenticated():
+            # Recursos de datos (JSON, CSV…): 401 para que el fetch del front lo detecte;
+            # con un 302 recibía el HTML del login y fallaba en silencio al parsear JSON
+            if not (path_clean == "/" or path_clean.endswith(".html")):
+                self._send_json({"ok": False, "error": "No autorizado"}, 401)
+                return
             self.send_response(302)
-            self.send_header("Location", "/config.html")
+            self.send_header("Location", "/config.html?next=" + quote(self.path, safe=""))
             self.end_headers()
             return
 
@@ -1095,6 +1115,10 @@ class SOCHandler(SimpleHTTPRequestHandler):
 
     def _handle_api_get(self):
         path = self.path.split("?")[0]
+
+        if path == "/api/config/session":
+            self._send_json({"ok": self._is_authenticated()}, 200 if self._is_authenticated() else 401)
+            return
 
         if path == "/api/config/rules":
             if not self._require_auth():
@@ -1144,6 +1168,35 @@ class SOCHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
 
+        elif path == "/api/config/replication-targets":
+            if not self._require_auth():
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT * FROM replication_targets ORDER BY id")
+                        targets = [dict(r) for r in cur.fetchall()]
+                        cur.execute("SELECT * FROM replication_watermarks")
+                        wm_rows = [dict(r) for r in cur.fetchall()]
+                wm_by_target: dict = {}
+                for w in wm_rows:
+                    wm_by_target.setdefault(w["target_id"], []).append(w)
+                for t in targets:
+                    t["watermarks"] = wm_by_target.get(t["id"], [])
+                self._send_json({"ok": True, "targets": targets})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif path == "/api/config/replication-tables":
+            if not self._require_auth():
+                return
+            try:
+                sys.path.insert(0, str(BASE_DIR.parent))
+                from app.modules.replication.tables import REPLICABLE_TABLES
+                self._send_json({"ok": True, "tables": REPLICABLE_TABLES})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
         else:
             self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
 
@@ -1160,10 +1213,20 @@ class SOCHandler(SimpleHTTPRequestHandler):
             if body.get("username") == cfg_user and body.get("password") == cfg_pass:
                 token = _create_session()
                 self._send_json({"ok": True, "token": token}, extra_headers={
-                    "Set-Cookie": f"soc_session={token}; HttpOnly; SameSite=Strict; Path=/"
+                    "Set-Cookie": (f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/; "
+                                   f"Max-Age={SESSION_TTL_HOURS * 3600}")
                 })
             else:
                 self._send_json({"ok": False, "error": "Credenciales incorrectas"}, 401)
+            return
+
+        if path == "/api/config/logout":
+            # La cookie es HttpOnly: solo el servidor puede borrarla
+            _sessions.pop(self._get_token(), None)
+            _sessions.pop(self._cookie_token(), None)
+            self._send_json({"ok": True}, extra_headers={
+                "Set-Cookie": f"{SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"
+            })
             return
 
         if not self._require_auth():
@@ -1229,6 +1292,57 @@ class SOCHandler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": True})
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif path == "/api/config/replication-targets":
+            body     = self._read_body()
+            required = ["name", "host", "port"]
+            if not all(body.get(f) for f in required):
+                self._send_json({"ok": False, "error": "Faltan campos requeridos (nombre, host, puerto)"}, 400)
+                return
+            try:
+                port = int(body["port"])
+            except (TypeError, ValueError):
+                self._send_json({"ok": False, "error": "Puerto inválido"}, 400)
+                return
+            if not (1 <= port <= 65535):
+                self._send_json({"ok": False, "error": "El puerto debe estar entre 1 y 65535"}, 400)
+                return
+            tables      = body.get("tables") or []
+            fingerprint = str(body.get("tls_fingerprint", "")).strip() or None
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO replication_targets (name, host, port, enabled, tables, tls_fingerprint)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            RETURNING id
+                        """, (
+                            body["name"], body["host"], port,
+                            bool(body.get("enabled", True)),
+                            json.dumps(tables), fingerprint,
+                        ))
+                        target_id = cur.fetchone()["id"]
+                    conn.commit()
+                self._send_json({"ok": True, "id": target_id})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif path.startswith("/api/config/replication-targets/") and path.endswith("/test"):
+            target_id = path.split("/")[-2]
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT host, port, tls_fingerprint FROM replication_targets WHERE id = %s", (target_id,))
+                        target = cur.fetchone()
+                if not target:
+                    self._send_json({"ok": False, "error": "Destino no encontrado"}, 404)
+                    return
+                sys.path.insert(0, str(BASE_DIR.parent))
+                from app.modules.replication.sender import test_connection
+                test_connection(target["host"], target["port"], target.get("tls_fingerprint"))
+                self._send_json({"ok": True, "message": "Conexión TLS establecida correctamente"})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)})
 
         elif path == "/api/config/test-smtp":
             try:
@@ -1316,6 +1430,40 @@ class SOCHandler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(e)}, 400)
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
+        elif path.startswith("/api/config/replication-targets/"):
+            target_id = path.split("/")[-1]
+            body      = self._read_body()
+            required  = ["name", "host", "port"]
+            if not all(body.get(f) for f in required):
+                self._send_json({"ok": False, "error": "Faltan campos requeridos"}, 400)
+                return
+            try:
+                port = int(body["port"])
+            except (TypeError, ValueError):
+                self._send_json({"ok": False, "error": "Puerto inválido"}, 400)
+                return
+            if not (1 <= port <= 65535):
+                self._send_json({"ok": False, "error": "El puerto debe estar entre 1 y 65535"}, 400)
+                return
+            tables      = body.get("tables") or []
+            fingerprint = str(body.get("tls_fingerprint", "")).strip() or None
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            UPDATE replication_targets SET
+                                name = %s, host = %s, port = %s,
+                                tables = %s, tls_fingerprint = %s, updated_at = NOW()
+                            WHERE id = %s
+                        """, (body["name"], body["host"], port, json.dumps(tables), fingerprint, target_id))
+                        if cur.rowcount == 0:
+                            self._send_json({"ok": False, "error": "Destino no encontrado"}, 404)
+                            return
+                    conn.commit()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
         else:
             self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
 
@@ -1337,6 +1485,20 @@ class SOCHandler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": True})
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
+        elif path.startswith("/api/config/replication-targets/"):
+            target_id = path.split("/")[-1]
+            body      = self._read_body()
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE replication_targets SET enabled = %s, updated_at = NOW() WHERE id = %s",
+                            (body.get("enabled", True), target_id)
+                        )
+                    conn.commit()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
         else:
             self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
 
@@ -1350,6 +1512,16 @@ class SOCHandler(SimpleHTTPRequestHandler):
                 with db_connect() as conn:
                     with conn.cursor() as cur:
                         cur.execute("DELETE FROM alert_rules WHERE id = %s", (rule_id,))
+                    conn.commit()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+        elif path.startswith("/api/config/replication-targets/"):
+            target_id = path.split("/")[-1]
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM replication_targets WHERE id = %s", (target_id,))
                     conn.commit()
                 self._send_json({"ok": True})
             except Exception as e:

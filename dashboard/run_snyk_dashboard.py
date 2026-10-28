@@ -7,6 +7,10 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_FILE = os.path.join(BASE_DIR, "snyk_dashboard.html")
 JSON_FILE = os.path.join(BASE_DIR, "snyk_dashboard_data.json")
+# Batch generado por app/pipeline/sync_repos.py con los repos en scope
+# (custom property de GitHub ambiente=produccion)
+SCOPE_BATCH_FILE = os.path.join(os.path.dirname(BASE_DIR), "repos_snyk_batch.txt")
+SCOPE_LABEL = "produccion"
 
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
@@ -26,6 +30,58 @@ NOT_DISMISSED_FRAGMENT = """
           AND sd.is_dismissed = TRUE
     )
 """
+
+# solo repos en scope; se apoya en la tabla temporal que crea _prepare_scope
+IN_SCOPE_FRAGMENT = "snyk_findings.repo_name IN (SELECT repo_name FROM snyk_scope)"
+
+
+def load_scope_repos() -> list[str] | None:
+    """
+    Nombres de los repos en scope según repos_snyk_batch.txt. Devuelve None
+    si el batch no existe o está vacío (entonces no se filtra nada).
+    """
+    if not os.path.exists(SCOPE_BATCH_FILE):
+        return None
+    names = []
+    with open(SCOPE_BATCH_FILE, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                names.append(os.path.basename(line.rstrip("/")))
+    return sorted(set(names)) or None
+
+
+def _prepare_scope(cur, scope_repos: list[str] | None) -> None:
+    """Crea la tabla temporal snyk_scope con los repos a mostrar."""
+    cur.execute("CREATE TEMP TABLE IF NOT EXISTS snyk_scope (repo_name TEXT PRIMARY KEY)")
+    cur.execute("TRUNCATE snyk_scope")
+    if scope_repos is None:
+        # sin batch: mostrar todos los repos con hallazgos
+        cur.execute("INSERT INTO snyk_scope SELECT DISTINCT repo_name FROM snyk_findings WHERE repo_name IS NOT NULL")
+    else:
+        cur.executemany("INSERT INTO snyk_scope (repo_name) VALUES (%s)", [(r,) for r in scope_repos])
+
+
+def scan_state(total_active: int, last_status: str | None) -> str:
+    """
+    Estado de un repo para el dashboard:
+      vulnerable  — tiene hallazgos activos
+      clean       — se escaneó y no tiene hallazgos activos
+      pending     — todavía no se ha escaneado
+      unsupported — Snyk no encontró un proyecto soportado
+      error       — el último escaneo falló
+    """
+    if total_active > 0:
+        return "vulnerable"
+    if not last_status:
+        return "pending"
+    if last_status.startswith("success"):
+        return "clean"
+    if last_status == "no_supported_project":
+        return "unsupported"
+    if last_status.startswith("failed"):
+        return "error"
+    return "pending"
 
 
 def get_connection():
@@ -186,25 +242,49 @@ def build_dashboard_data():
     if not display_project_field:
         raise RuntimeError("No encontré una columna de repositorio/proyecto en snyk_findings")
 
+    scope_repos = load_scope_repos()
+    _prepare_scope(cur, scope_repos)
+    active = f"{IN_SCOPE_FRAGMENT} AND {NOT_DISMISSED_FRAGMENT}"
+
+    # último escaneo de cada repo en scope (sin fila = nunca escaneado)
+    cur.execute("""
+        SELECT s.repo_name, r.status, r.finished_at
+        FROM snyk_scope s
+        LEFT JOIN LATERAL (
+            SELECT status, finished_at FROM snyk_scan_runs sr
+            WHERE sr.repo_name = s.repo_name
+            ORDER BY sr.started_at DESC
+            LIMIT 1
+        ) r ON TRUE;
+    """)
+    last_scan = {
+        repo: {"status": status, "finished_at": finished_at.isoformat() if finished_at else None}
+        for repo, status, finished_at in cur.fetchall()
+    }
+
     display_project_sql = sql_ident(display_project_field)
     severity_sql = sql_ident(severity_field)
     scan_type_sql = sql_ident(scan_type_field)
 
     # total findings activos (excluye combinaciones repo+issue descartadas)
     cur.execute(f"""
-        SELECT COUNT(*) FROM snyk_findings WHERE {NOT_DISMISSED_FRAGMENT};
+        SELECT COUNT(*) FROM snyk_findings WHERE {active};
     """)
     total_findings = int(cur.fetchone()[0] or 0)
 
     # total de vulnerabilidades descartadas (grupos repo+issue, no filas individuales)
-    cur.execute("SELECT COUNT(*) FROM snyk_dismissals WHERE is_dismissed = TRUE;")
+    cur.execute("""
+        SELECT COUNT(*) FROM snyk_dismissals
+        WHERE is_dismissed = TRUE
+          AND repo_name IN (SELECT repo_name FROM snyk_scope);
+    """)
     total_dismissed = int(cur.fetchone()[0] or 0)
 
     # severity global
     cur.execute(f"""
         SELECT COALESCE(LOWER({severity_sql}), 'unknown') AS severity, COUNT(*) AS total
         FROM snyk_findings
-        WHERE {NOT_DISMISSED_FRAGMENT}
+        WHERE {active}
         GROUP BY COALESCE(LOWER({severity_sql}), 'unknown');
     """)
     severity_raw = rows_to_dict(cur.fetchall())
@@ -214,7 +294,7 @@ def build_dashboard_data():
     cur.execute(f"""
         SELECT COALESCE(LOWER({scan_type_sql}), 'unknown') AS scan_type, COUNT(*) AS total
         FROM snyk_findings
-        WHERE {NOT_DISMISSED_FRAGMENT}
+        WHERE {active}
         GROUP BY COALESCE(LOWER({scan_type_sql}), 'unknown')
         ORDER BY total DESC;
     """)
@@ -224,7 +304,7 @@ def build_dashboard_data():
     cur.execute(f"""
         SELECT COALESCE(LOWER({severity_sql}), 'unknown') AS severity, COUNT(*) AS total
         FROM snyk_findings
-        WHERE LOWER({scan_type_sql}) = 'sca' AND {NOT_DISMISSED_FRAGMENT}
+        WHERE LOWER({scan_type_sql}) = 'sca' AND {active}
         GROUP BY COALESCE(LOWER({severity_sql}), 'unknown');
     """)
     sca_raw = rows_to_dict(cur.fetchall())
@@ -234,7 +314,7 @@ def build_dashboard_data():
     cur.execute(f"""
         SELECT COALESCE(LOWER({severity_sql}), 'unknown') AS severity, COUNT(*) AS total
         FROM snyk_findings
-        WHERE LOWER({scan_type_sql}) = 'code' AND {NOT_DISMISSED_FRAGMENT}
+        WHERE LOWER({scan_type_sql}) = 'code' AND {active}
         GROUP BY COALESCE(LOWER({severity_sql}), 'unknown');
     """)
     code_raw = rows_to_dict(cur.fetchall())
@@ -245,7 +325,7 @@ def build_dashboard_data():
         SELECT COALESCE(NULLIF(TRIM({display_project_sql}), ''), 'unknown') AS project_display,
                COUNT(*) AS total
         FROM snyk_findings
-        WHERE {NOT_DISMISSED_FRAGMENT}
+        WHERE {active}
         GROUP BY COALESCE(NULLIF(TRIM({display_project_sql}), ''), 'unknown')
         ORDER BY total DESC
         LIMIT 15;
@@ -255,26 +335,29 @@ def build_dashboard_data():
         for name, total in cur.fetchall()
     ]
 
-    # tabla por proyecto con severidades (solo activos)
+    # tabla por proyecto con severidades: todos los repos en scope, aunque
+    # no tengan hallazgos activos (limpios o pendientes de escanear)
     cur.execute(f"""
         SELECT
-            COALESCE(NULLIF(TRIM({display_project_sql}), ''), 'unknown') AS project_display,
-            COUNT(*) AS total,
-            SUM(CASE WHEN LOWER({severity_sql}) = 'critical' THEN 1 ELSE 0 END) AS critical,
-            SUM(CASE WHEN LOWER({severity_sql}) = 'high' THEN 1 ELSE 0 END) AS high,
-            SUM(CASE WHEN LOWER({severity_sql}) = 'medium' THEN 1 ELSE 0 END) AS medium,
-            SUM(CASE WHEN LOWER({severity_sql}) = 'low' THEN 1 ELSE 0 END) AS low,
-            SUM(CASE WHEN LOWER({severity_sql}) = 'warning' THEN 1 ELSE 0 END) AS warning,
-            SUM(CASE WHEN LOWER({severity_sql}) = 'note' THEN 1 ELSE 0 END) AS note,
-            SUM(CASE WHEN LOWER({severity_sql}) = 'error' THEN 1 ELSE 0 END) AS error
-        FROM snyk_findings
-        WHERE {NOT_DISMISSED_FRAGMENT}
-        GROUP BY COALESCE(NULLIF(TRIM({display_project_sql}), ''), 'unknown')
-        ORDER BY total DESC
-        LIMIT 50;
+            s.repo_name AS project_display,
+            COUNT(f.*) AS total,
+            SUM(CASE WHEN LOWER(f.{severity_sql}) = 'critical' THEN 1 ELSE 0 END) AS critical,
+            SUM(CASE WHEN LOWER(f.{severity_sql}) = 'high' THEN 1 ELSE 0 END) AS high,
+            SUM(CASE WHEN LOWER(f.{severity_sql}) = 'medium' THEN 1 ELSE 0 END) AS medium,
+            SUM(CASE WHEN LOWER(f.{severity_sql}) = 'low' THEN 1 ELSE 0 END) AS low,
+            SUM(CASE WHEN LOWER(f.{severity_sql}) = 'warning' THEN 1 ELSE 0 END) AS warning,
+            SUM(CASE WHEN LOWER(f.{severity_sql}) = 'note' THEN 1 ELSE 0 END) AS note,
+            SUM(CASE WHEN LOWER(f.{severity_sql}) = 'error' THEN 1 ELSE 0 END) AS error
+        FROM snyk_scope s
+        LEFT JOIN snyk_findings f
+               ON f.repo_name = s.repo_name
+              AND {NOT_DISMISSED_FRAGMENT.replace("snyk_findings.", "f.")}
+        GROUP BY s.repo_name
+        ORDER BY total DESC, s.repo_name;
     """)
     project_summary = []
     for row in cur.fetchall():
+        scan = last_scan.get(row[0], {})
         project_summary.append({
             "project_name": str(row[0]),
             "total": int(row[1]),
@@ -285,7 +368,13 @@ def build_dashboard_data():
             "warning": int(row[6] or 0),
             "note": int(row[7] or 0),
             "error": int(row[8] or 0),
+            "state": scan_state(int(row[1]), scan.get("status")),
+            "last_status": scan.get("status"),
+            "last_scan_at": scan.get("finished_at"),
         })
+    state_rank = {"vulnerable": 0, "clean": 1, "unsupported": 2, "error": 3, "pending": 4}
+    project_summary.sort(key=lambda p: (state_rank.get(p["state"], 9), -p["total"], p["project_name"].lower()))
+    states = {p["project_name"]: p for p in project_summary}
 
     # detalle de vulnerabilidades por proyecto (activas, para el bloque "top vulnerabilidades")
     project_vulns = []
@@ -331,7 +420,7 @@ def build_dashboard_data():
                         ORDER BY COUNT(*) DESC
                     ) AS rn
                 FROM snyk_findings
-                WHERE {NOT_DISMISSED_FRAGMENT}
+                WHERE {active}
                 GROUP BY
                     COALESCE(NULLIF(TRIM({display_project_sql}), ''), 'unknown'),
                     {vuln_display_expr},
@@ -366,6 +455,7 @@ def build_dashboard_data():
             COALESCE(cve, '') AS cve,
             COUNT(*) AS occurrences
         FROM snyk_findings
+        WHERE {IN_SCOPE_FRAGMENT}
         GROUP BY repo_name, issue_id, {title_expr}, COALESCE(LOWER({severity_sql}), 'unknown'),
                  COALESCE(package_name, ''), COALESCE(version, ''), COALESCE(cve, '')
         ORDER BY repo_name,
@@ -398,17 +488,33 @@ def build_dashboard_data():
         }
         projects_map.setdefault(repo_name, []).append(item)
 
+    for name in states:
+        projects_map.setdefault(name, [])
+
     vulnerabilities_by_project = [
-        {"project_name": name, "items": items}
+        {
+            "project_name": name,
+            "items": items,
+            "state": states.get(name, {}).get("state"),
+            "last_status": states.get(name, {}).get("last_status"),
+        }
         for name, items in sorted(
             projects_map.items(),
-            key=lambda kv: sum(1 for i in kv[1] if not i["dismissed"]),
-            reverse=True,
+            key=lambda kv: (-sum(1 for i in kv[1] if not i["dismissed"]), kv[0]),
         )
     ]
 
     data = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "scope": {
+            "label": SCOPE_LABEL if scope_repos is not None else None,
+            "repos": scope_repos or [],
+            "total_repos": len(scope_repos) if scope_repos is not None else None,
+            "states": {
+                st: sum(1 for p in project_summary if p["state"] == st)
+                for st in ("vulnerable", "clean", "pending", "unsupported", "error")
+            },
+        },
         "total_findings": total_findings,
         "total_dismissed": total_dismissed,
         "field_detection": {

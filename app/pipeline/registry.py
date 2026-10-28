@@ -35,7 +35,18 @@ try:
     class _SnykPipeline:
         name = "snyk"
         def execute(self, **kwargs):
-            batch_file = kwargs.get("repos_file", "repos_snyk_batch.txt")
+            batch_file = kwargs.get("repos_file")
+            sync_error = None
+            if batch_file is None:
+                # Sin batch explícito: regenerar el batch con los repos que en
+                # GitHub tienen ambiente=produccion. Si falla, se usa el último.
+                batch_file = "repos_snyk_batch.txt"
+                try:
+                    from app.pipeline.sync_repos import sync_repos
+                    sync_repos()
+                except Exception as e:
+                    sync_error = str(e)
+                    logger.warning(f"[snyk] sync_repos falló, se usa el batch existente: {e}")
             batch_path = Path(batch_file)
             if not batch_path.exists():
                 return {"ok": False, "module": "snyk", "error": f"batch file no encontrado: {batch_file}"}
@@ -51,7 +62,8 @@ try:
             return {
                 "ok":      True,
                 "module":  "snyk",
-                "message": f"Snyk completado: {len(results)} repos, {total} findings",
+                "message": f"Snyk completado: {len(results)} repos, {total} findings"
+                           + (f" (sync_repos falló: {sync_error})" if sync_error else ""),
                 "results": results,
                 "total_findings": total,
                 "failed": failed,
@@ -121,14 +133,29 @@ except Exception as e:
     _cpanel = _FallbackCpanel()
 
 # ---------------------------------------------------------------------------
+# Replicación remota
+# ---------------------------------------------------------------------------
+try:
+    from app.modules.replication.service import ReplicationPipeline
+    _replication = ReplicationPipeline()
+except Exception as e:
+    logger.warning(f"[registry] Replicación no disponible: {e}")
+    class _FallbackReplication:
+        name = "replication"
+        def execute(self, **kwargs):
+            return {"ok": False, "module": "replication", "error": "no disponible"}
+    _replication = _FallbackReplication()
+
+# ---------------------------------------------------------------------------
 # Registro central
 # ---------------------------------------------------------------------------
 MODULES = {
-    "sentinel": _sentinel,
-    "snyk":     _snyk,
-    "nmap":     _nmap,
-    "fortinet": _fortinet,
-    "cpanel":   _cpanel,
+    "sentinel":    _sentinel,
+    "snyk":        _snyk,
+    "nmap":        _nmap,
+    "fortinet":    _fortinet,
+    "cpanel":      _cpanel,
+    "replication": _replication,
 }
 
 

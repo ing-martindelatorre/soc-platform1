@@ -305,6 +305,7 @@ function renderTimeline(timeline) {
 async function loadData() {
   try {
     const res  = await fetch(JSON_URL + '?t=' + Date.now());
+    if (res.status === 401) { location.href = '/config.html?next=' + encodeURIComponent(location.pathname + location.search); return; }
     const data = await res.json();
     render(data);
   } catch(e) {

@@ -19,7 +19,11 @@ RETENTION_POLICIES: list[tuple[str, str, str, int]] = [
     ("snyk_findings",      "created_at",   "RETENTION_SNYK_DAYS",       180),
     ("nmap_findings",      "created_at",   "RETENTION_NMAP_DAYS",        90),
     ("nmap_assets",        "last_seen",    "RETENTION_NMAP_ASSETS_DAYS", 180),
-    ("fortinet_threats",   "collected_at", "RETENTION_FORTINET_DAYS",   365),
+    ("fortinet_threats",   "collected_at", "RETENTION_FORTINET_DAYS",    60),
+    ("fortinet_log_raw",   "collected_at", "RETENTION_FORTINET_DAYS",    60),
+    ("fortinet_raw_snapshots", "collected_at", "RETENTION_FORTINET_SNAPSHOTS_DAYS", 60),
+    ("fortinet_collection_errors", "collected_at", "RETENTION_FORTINET_ERRORS_DAYS", 60),
+    ("fortinet_log_collection_errors", "collected_at", "RETENTION_FORTINET_ERRORS_DAYS", 60),
     ("job_runs",           "started_at",   "RETENTION_JOB_RUNS_DAYS",    30),
     ("alert_log",          "sent_at",      "RETENTION_ALERT_LOG_DAYS",  365),
 ]
@@ -34,7 +38,9 @@ def run_data_cleanup() -> dict:
       RETENTION_SNYK_DAYS        (default 180)
       RETENTION_NMAP_DAYS        (default 90)
       RETENTION_NMAP_ASSETS_DAYS (default 180)
-      RETENTION_FORTINET_DAYS    (default 365)
+      RETENTION_FORTINET_DAYS    (default 60)
+      RETENTION_FORTINET_SNAPSHOTS_DAYS (default 60)
+      RETENTION_FORTINET_ERRORS_DAYS (default 60)
       RETENTION_JOB_RUNS_DAYS    (default 30)
       RETENTION_ALERT_LOG_DAYS   (default 365)
     """

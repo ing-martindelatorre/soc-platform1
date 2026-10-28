@@ -34,6 +34,7 @@ class SentinelLoader:
             raw_hash = EXCLUDED.raw_hash,
             raw_json = EXCLUDED.raw_json,
             ingested_at = NOW()
+        WHERE sentinel_incidents.raw_hash IS DISTINCT FROM EXCLUDED.raw_hash
         """
 
         values = [(

@@ -456,6 +456,7 @@ function updateGlobal(healths) {
 async function loadStatus() {
   try {
     const res = await fetch('soc_status.json?t=' + Date.now());
+    if (res.status === 401) { location.href = '/config.html?next=' + encodeURIComponent(location.pathname + location.search); return; }
     if (!res.ok) return;
     const d = await res.json();
     const healths = [];

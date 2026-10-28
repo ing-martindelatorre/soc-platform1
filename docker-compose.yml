@@ -19,12 +19,25 @@ services:
     image: postgres:16-alpine
     container_name: soc1_postgres
     restart: unless-stopped
+    shm_size: "256mb"
     env_file:
       - .env
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
+    # Tuning de escritura: la VM comparte disco físico con otras VMs en el
+    # host Proxmox y el volumen de ingesta (Fortinet/Sentinel) la satura.
+    # shared_buffers en 2GB evita que los backends se vean forzados a
+    # flushear páginas sucias ellos mismos (visto en pg_stat_bgwriter:
+    # buffers_backend >> buffers_checkpoint); checkpoint_timeout/max_wal_size
+    # más altos espacian los checkpoints para que las páginas que se
+    # reescriben seguido se consoliden en menos flushes físicos.
+    command: >
+      postgres
+      -c shared_buffers=2GB
+      -c checkpoint_timeout=15min
+      -c max_wal_size=4GB
     ports:
       - "${DB_PORT_HOST:-5434}:5432"   # Puerto externo configurable, interno siempre 5432
     volumes:

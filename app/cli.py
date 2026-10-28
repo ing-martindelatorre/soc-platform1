@@ -11,7 +11,7 @@ def build_parser():
 
     parser.add_argument(
         "module",
-        choices=["sentinel", "snyk", "nmap", "fortinet", "cpanel"],
+        choices=["sentinel", "snyk", "nmap", "fortinet", "cpanel", "replication"],
         help="module to run"
     )
 
@@ -19,7 +19,7 @@ def build_parser():
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--csv-path")
     parser.add_argument("--log-path")
-    parser.add_argument("--endpoint", default="/api/v2/log/disk/traffic/forward/system")
+    parser.add_argument("--endpoint", default="/api/v2/log/memory/traffic/forward")
     parser.add_argument("--date-from")
     parser.add_argument("--date-to")
 
