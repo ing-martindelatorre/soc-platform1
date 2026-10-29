@@ -1,7 +1,41 @@
 from __future__ import annotations
 
+import logging
+import time
+
 import requests
 from app.core.config import settings
+
+logger = logging.getLogger("soc-platform")
+
+# Reintentos ante fallas transitorias de la API (timeouts, errores de red, 429/5xx).
+# Un 401/403/4xx no se reintenta: es un problema de token o de petición.
+MAX_ATTEMPTS = 3
+BACKOFF_SECONDS = (10, 30)
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def _get_with_retry(url: str, headers: dict, params: dict) -> requests.Response:
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=60)
+            if resp.status_code not in RETRYABLE_STATUS:
+                return resp
+            reason = f"HTTP {resp.status_code}"
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            if attempt == MAX_ATTEMPTS:
+                raise
+            reason = type(exc).__name__
+
+        if attempt == MAX_ATTEMPTS:
+            return resp
+
+        wait = BACKOFF_SECONDS[min(attempt - 1, len(BACKOFF_SECONDS) - 1)]
+        logger.warning(
+            "[sentinel] %s en intento %d/%d, reintentando en %ds",
+            reason, attempt, MAX_ATTEMPTS, wait,
+        )
+        time.sleep(wait)
 
 
 class SentinelExtractor:
@@ -39,7 +73,7 @@ class SentinelExtractor:
             if cursor:
                 params["cursor"] = cursor
 
-            resp = requests.get(url, headers=headers, params=params, timeout=60)
+            resp = _get_with_retry(url, headers, params)
 
             if resp.status_code >= 400:
                 raise RuntimeError(

@@ -19,6 +19,8 @@ Variables de cada módulo: [variables-entorno.md](variables-entorno.md).
 - **Extract** (`SentinelExtractor`): llama a `GET {S1_BASE_URL}/web/api/v2.1/threats`
   con paginación por cursor (`limit` 200 por página). Acepta `date_from` y
   `date_to` (`createdAt__gte`, `createdAt__lte`) para reprocesar rangos.
+  Cada página se reintenta hasta 3 veces (esperas de 10 s y 30 s) ante
+  timeout, error de conexión o HTTP 429/5xx; un 401/4xx falla de inmediato.
 - **Transform**: normaliza cada amenaza a `incident_id`, `threat_name`,
   `classification`, `severity`, `status`, `agent_*`, `username` y fechas.
   Calcula `raw_hash` y conserva la respuesta original en `raw_json`.
