@@ -15,3 +15,6 @@ dashboard/*_output.html
 dashboard/fortinet_dashboard_*.html
 virus_bloqueados_*.csv
 targets_nmap_batch.txt
+
+# Evidencias de pentest (sensible)
+pruebasfmas/
