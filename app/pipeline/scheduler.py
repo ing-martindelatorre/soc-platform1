@@ -22,6 +22,7 @@ from app.core.db import get_connection
 from app.pipeline.cleanup import run_data_cleanup
 from app.pipeline.job_config import JOB_DEFINITIONS, build_trigger, get_all_schedules
 from app.pipeline.runner import run_pipeline
+from app.reports.executive import run_monthly_job
 
 
 # =============================================================================
@@ -86,6 +87,19 @@ def execute_alert_job() -> None:
             print(f"[alerts] {sent_failures} alerta(s) de pipeline enviada(s)")
     except Exception as exc:
         print(f"[alerts] ERROR en fallos de pipeline: {exc}")
+
+
+def execute_exec_report_job() -> None:
+    try:
+        result = run_monthly_job()
+        if result.get("skipped"):
+            return
+        if result.get("ok"):
+            print("[exec-report] Reporte ejecutivo mensual enviado")
+        else:
+            print(f"[exec-report] ERROR: {result.get('error')}")
+    except Exception as exc:
+        print(f"[exec-report] ERROR: {exc}")
 
 
 # =============================================================================
@@ -215,6 +229,15 @@ def main() -> None:
         max_instances=1, coalesce=True, misfire_grace_time=1800,
     )
 
+    # ── REPORTE EJECUTIVO MENSUAL — revisa cada hora ─────────────────────────
+    # El día/hora de envío y los destinatarios se configuran en el panel
+    # (tabla executive_report_config); solo envía una vez por mes.
+    scheduler.add_job(
+        execute_exec_report_job, trigger="cron", minute=10,
+        id="exec_report_job", replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=1800,
+    )
+
     print("=" * 55)
     print("  SOC Platform — Scheduler de Recolección")
     print("=" * 55)
@@ -227,6 +250,7 @@ def main() -> None:
         print(f"  {jd['label']:<28} {valor}")
     print("  Motor de alertas             cada 5 minutos")
     print("  Limpieza de datos            diaria 03:00")
+    print("  Reporte ejecutivo mensual    revisión horaria")
     print("=" * 55)
     print("  Los intervalos de arriba se pueden cambiar en caliente")
     print("  desde el panel de configuración (config_watcher_job, cada 30s)")

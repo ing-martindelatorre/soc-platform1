@@ -195,6 +195,22 @@ del tráfico saliente.
 Las IPs privadas no se consultan. Para confiar en una organización nueva,
 agrega su ASN o un patrón a `trusted_orgs.py`.
 
+## Reportes ejecutivos (`app/reports/executive.py`)
+
+No es un pipeline ETL: lee lo que ya recolectaron los módulos y genera un
+reporte mensual para gerencia. Lo usan el panel (`/api/config/exec-reports/*`) y
+el scheduler (`exec_report_job`).
+
+- `collect_report_data(period)`: métricas del mes. Cada fuente va en su propia
+  sección; si una falla, el reporte sale sin ella y lo indica en el pie.
+- `build_highlights(data)`: convierte las métricas en las amenazas más
+  importantes (nivel, cifra, qué pasó y qué se recomienda). El nivel de riesgo
+  del mes sale de ahí: **alto** si hay algo crítico (p.ej. ransomware pendiente),
+  **medio** si hay algo importante, **bajo** en otro caso.
+- Las traducciones a lenguaje no técnico (`FORTI_CATEGORIES`,
+  `SENTINEL_CLASSES`, `VIRUS_FAMILIES`, `NMAP_SERVICES`, `PIRACY_PATTERN`) están
+  al inicio del archivo; amplíalas ahí.
+
 ## Cómo añadir un módulo nuevo
 
 1. Crea `app/modules/<nombre>/` con `extract.py`, `transform.py`, `load.py`

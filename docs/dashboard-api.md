@@ -89,6 +89,25 @@ sesión (`401` si falta).
 | GET | `/api/config/alert-log` | Últimas 100 alertas |
 | POST | `/api/config/test-smtp` | Envía un correo de prueba a `SMTP_USER` |
 | POST | `/api/dismissals` | Descarta o reactiva un hallazgo de Snyk |
+| GET | `/api/config/exec-reports` | Lista los reportes ejecutivos (sin el HTML) con su último envío, y la config de envío automático |
+| GET | `/api/config/exec-reports/<id>/html` | HTML del reporte listo (`?download=1` lo descarga). Responde `text/html` con CSP sin scripts |
+| POST | `/api/config/exec-reports/generate` | `{"period": "AAAA-MM"}`; lanza la generación en un hilo y devuelve `id` y `started` (`false` si ya se estaba generando) |
+| POST | `/api/config/exec-reports/<id>/send` | `{"recipients": "a@x.com, b@x.com"}`; envía el reporte por SMTP |
+| PUT | `/api/config/exec-reports-config` | `{"enabled", "recipients", "send_day", "send_hour"}` del envío automático |
+| DELETE | `/api/config/exec-reports/<id>` | Elimina un reporte y su historial de envíos |
+
+### Reportes ejecutivos
+
+Pestaña **Reportes Ejecutivos** del panel. `app/reports/executive.py` agrega el
+mes (hora de México) de FortiGate, SentinelOne, Snyk (repos en scope, sin
+descartados), Nmap y cPanel, prioriza las amenazas en lenguaje de negocio y arma
+un HTML compatible con clientes de correo (gráficas hechas con tablas, sin JS ni
+imágenes). La agregación de `fortinet_threats` recorre millones de filas, por eso
+la generación corre en segundo plano (≈30 s–4 min) y el resultado se guarda en
+`executive_reports`. Si se genera el mes en curso, el reporte sale marcado como
+parcial. La comparación con el mes anterior usa el reporte guardado de ese mes;
+si no existe se recalcula, pero Fortinet solo se compara si la retención (60
+días) aún cubre ese mes completo.
 
 ### Crear o editar una regla
 

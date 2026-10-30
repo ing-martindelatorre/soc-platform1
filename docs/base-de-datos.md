@@ -6,7 +6,7 @@ Datos persistentes en el volumen `soc1_postgres_data`. pgAdmin 4 corre en
 
 ## Migraciones
 
-Los archivos `sql/001_*.sql` a `sql/025_*.sql` son idempotentes en su mayoría
+Los archivos `sql/001_*.sql` a `sql/027_*.sql` son idempotentes en su mayoría
 (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`). No hay runner:
 
 - **Base nueva:** `docker-compose.yml` monta `./sql` en
@@ -41,6 +41,8 @@ idempotente.
 | 019 | Regla de alerta de antivirus Fortinet (inserta una fila en `alert_rules`) |
 | 021 | `snyk_dismissals` |
 | 025 | Reconstruye `job_config` con los `job_id` reales del scheduler |
+| 026 | `replication_targets`, `replication_watermarks` (replicación remota) |
+| 027 | `executive_report_config`, `executive_reports`, `executive_report_sends` (reportes ejecutivos mensuales) |
 
 ## Tablas por dominio
 
@@ -108,6 +110,19 @@ buzón afectado en detecciones de antivirus sobre POP3, IMAP o SMTP.
 ### Alertas
 
 `alert_rules` y `alert_log`; ver [alertas.md](alertas.md).
+
+### Reportes ejecutivos
+
+- `executive_report_config`: una sola fila (`id = 1`) con el envío automático:
+  `enabled`, `recipients`, `send_day` (1–28) y `send_hour` (0–23, hora de México).
+- `executive_reports`: un reporte por mes (`period` = primer día del mes, único).
+  `status` = `generating | ready | failed`; guarda las métricas agregadas en `data`
+  (JSONB) y el correo ya armado en `html`. Regenerar un mes sobrescribe su fila.
+  Los `data.kpis` del mes anterior se reusan para la comparación mes contra mes.
+- `executive_report_sends`: historial de envíos (`trigger` = `manual | auto`,
+  `status` = `sent | failed`). Se borra en cascada con el reporte.
+
+Sin política de retención: son una fila por mes.
 
 ### Reputación de IPs
 

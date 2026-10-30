@@ -11,6 +11,7 @@ Servidor único del SOC Platform.
 
 import json
 import os
+import re
 import secrets
 import sys
 import threading
@@ -138,6 +139,19 @@ def _check_auth(token: str) -> bool:
         _sessions.pop(token, None)
         return False
     return True
+
+
+_EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
+
+
+def _parse_recipients(value) -> list[str] | None:
+    """Lista o texto separado por comas/saltos de línea → correos. None si alguno es inválido."""
+    if isinstance(value, str):
+        value = re.split(r"[,;\s]+", value)
+    emails = [str(v).strip() for v in (value or []) if str(v).strip()]
+    if any(not _EMAIL_RE.match(e) for e in emails):
+        return None
+    return list(dict.fromkeys(emails))
 
 
 def _create_session() -> str:
@@ -1197,6 +1211,65 @@ class SOCHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
 
+        elif path == "/api/config/exec-reports":
+            if not self._require_auth():
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        # Sin html/data completos: solo lo que necesita la tabla del panel
+                        cur.execute("""
+                            SELECT r.id, r.period, r.status, r.error, r.started_at, r.generated_at,
+                                   r.data->>'risk_level' AS risk_level,
+                                   (r.data->>'partial')::boolean AS partial,
+                                   s.sent_at AS last_sent_at, s.status AS last_send_status,
+                                   s.recipients AS last_recipients, s.trigger AS last_trigger
+                            FROM executive_reports r
+                            LEFT JOIN LATERAL (
+                                SELECT sent_at, status, recipients, trigger
+                                FROM executive_report_sends
+                                WHERE report_id = r.id ORDER BY sent_at DESC LIMIT 1
+                            ) s ON TRUE
+                            ORDER BY r.period DESC
+                        """)
+                        reports = [dict(r) for r in cur.fetchall()]
+                        cur.execute("SELECT * FROM executive_report_config WHERE id = 1")
+                        cfg = cur.fetchone()
+                self._send_json({"ok": True, "reports": reports, "config": dict(cfg) if cfg else None})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif path.startswith("/api/config/exec-reports/") and path.endswith("/html"):
+            if not self._require_auth():
+                return
+            try:
+                report_id = int(path.split("/")[-2])
+            except ValueError:
+                self._send_json({"ok": False, "error": "Id inválido"}, 400)
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT period, html FROM executive_reports WHERE id = %s AND status = 'ready'", (report_id,))
+                        row = cur.fetchone()
+                if not row or not row["html"]:
+                    self._send_json({"ok": False, "error": "Reporte no disponible"}, 404)
+                    return
+                body = row["html"].encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                # El reporte es HTML estático: sin scripts ni recursos externos
+                self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                if "download=1" in self.path:
+                    self.send_header("Content-Disposition",
+                                     f'attachment; filename="reporte_ejecutivo_{row["period"]:%Y-%m}.html"')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
         else:
             self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
 
@@ -1367,6 +1440,46 @@ class SOCHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
 
+        elif path == "/api/config/exec-reports/generate":
+            body = self._read_body()
+            try:
+                sys.path.insert(0, str(BASE_DIR.parent))
+                from app.reports.executive import parse_period, start_generation, build_and_store
+                period = parse_period(body.get("period") or None)
+            except ValueError as e:
+                self._send_json({"ok": False, "error": str(e)}, 400)
+                return
+            try:
+                report_id, started = start_generation(period)
+                if started:
+                    # Tarda minutos (agrega millones de filas de Fortinet): se genera en segundo plano
+                    threading.Thread(target=build_and_store, args=(report_id, period),
+                                     daemon=True, name=f"exec-report-{period:%Y-%m}").start()
+                self._send_json({"ok": True, "id": report_id, "started": started})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif path.startswith("/api/config/exec-reports/") and path.endswith("/send"):
+            body = self._read_body()
+            try:
+                report_id = int(path.split("/")[-2])
+            except ValueError:
+                self._send_json({"ok": False, "error": "Id inválido"}, 400)
+                return
+            recipients = _parse_recipients(body.get("recipients"))
+            if recipients is None:
+                self._send_json({"ok": False, "error": "Hay correos con formato inválido"}, 400)
+                return
+            if not recipients:
+                self._send_json({"ok": False, "error": "Indica al menos un destinatario"}, 400)
+                return
+            try:
+                sys.path.insert(0, str(BASE_DIR.parent))
+                from app.reports.executive import send_report
+                self._send_json(send_report(report_id, recipients, trigger="manual"))
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
         else:
             self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
 
@@ -1409,6 +1522,40 @@ class SOCHandler(SimpleHTTPRequestHandler):
                         if cur.rowcount == 0:
                             self._send_json({"ok": False, "error": "Regla no encontrada"}, 404)
                             return
+                    conn.commit()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+        elif path == "/api/config/exec-reports-config":
+            body       = self._read_body()
+            recipients = _parse_recipients(body.get("recipients"))
+            if recipients is None:
+                self._send_json({"ok": False, "error": "Hay correos con formato inválido"}, 400)
+                return
+            try:
+                send_day  = int(body.get("send_day", 1))
+                send_hour = int(body.get("send_hour", 8))
+            except (TypeError, ValueError):
+                self._send_json({"ok": False, "error": "Día u hora inválidos"}, 400)
+                return
+            if not (1 <= send_day <= 28 and 0 <= send_hour <= 23):
+                self._send_json({"ok": False, "error": "El día debe estar entre 1 y 28 y la hora entre 0 y 23"}, 400)
+                return
+            enabled = bool(body.get("enabled", False))
+            if enabled and not recipients:
+                self._send_json({"ok": False, "error": "Para activar el envío automático indica al menos un destinatario"}, 400)
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO executive_report_config (id, enabled, recipients, send_day, send_hour, updated_at)
+                            VALUES (1, %s, %s, %s, %s, NOW())
+                            ON CONFLICT (id) DO UPDATE
+                                SET enabled = EXCLUDED.enabled, recipients = EXCLUDED.recipients,
+                                    send_day = EXCLUDED.send_day, send_hour = EXCLUDED.send_hour,
+                                    updated_at = NOW()
+                        """, (enabled, recipients, send_day, send_hour))
                     conn.commit()
                 self._send_json({"ok": True})
             except Exception as e:
@@ -1522,6 +1669,20 @@ class SOCHandler(SimpleHTTPRequestHandler):
                 with db_connect() as conn:
                     with conn.cursor() as cur:
                         cur.execute("DELETE FROM replication_targets WHERE id = %s", (target_id,))
+                    conn.commit()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+        elif path.startswith("/api/config/exec-reports/"):
+            try:
+                report_id = int(path.split("/")[-1])
+            except ValueError:
+                self._send_json({"ok": False, "error": "Id inválido"}, 400)
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM executive_reports WHERE id = %s", (report_id,))
                     conn.commit()
                 self._send_json({"ok": True})
             except Exception as e:

@@ -114,6 +114,7 @@ falta reiniciar el scheduler. Si un `job_id` no tiene fila,
 | `config_watcher_job` | 30 s | Aplica cambios de `job_config` |
 | `alert_engine_job` | 5 min | `evaluate_and_send()` y `evaluate_job_failures()` |
 | `cleanup_job` | diario 03:00 | Borra registros según la política de retención |
+| `exec_report_job` | cada hora (min 10) | `run_monthly_job()`: a partir del día/hora de `executive_report_config`, genera y envía el reporte ejecutivo del mes anterior (una vez por mes, máx. 3 intentos) |
 
 ## Tablas de control
 
