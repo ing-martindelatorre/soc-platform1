@@ -50,6 +50,10 @@ MAX_AUTO_ATTEMPTS = 3
 # guardado solo sirven de comparación si se generó a lo más N días tras el cierre
 SNAPSHOT_MAX_DAYS = 10
 
+# Comparación histórica: meses mostrados (incluye el del reporte) y KPIs graficados
+HISTORY_MONTHS = 12
+HISTORY_KEYS   = ("blocked", "incidents", "open_risks")
+
 
 # =============================================================================
 # Fechas
@@ -498,6 +502,77 @@ def _previous_kpis(conn, period: date) -> dict:
     }
 
 
+def _month_add(d: date, n: int) -> date:
+    """Suma (o resta, con n negativo) n meses a un primer día de mes."""
+    idx = d.year * 12 + d.month - 1 + n
+    return date(idx // 12, idx % 12 + 1, 1)
+
+
+def _history(conn, period: date, kpis: dict, prev_kpis: dict) -> dict:
+    """
+    Serie mensual de KPIs para comparar con meses anteriores (máx. 12 meses
+    incluyendo el actual). Los datos crudos tienen retención corta (Fortinet
+    60 días), así que cada mes sale, en este orden, de:
+      1. el mes actual y el anterior: lo que ya se calculó para este reporte
+      2. su reporte guardado, si se generó con el mes ya cerrado
+      3. SentinelOne en vivo, solo si la retención aún cubre el mes completo
+    Lo que no se puede obtener queda en None ("sin datos").
+    """
+    months = [_month_add(period, -i) for i in range(HISTORY_MONTHS - 1, -1, -1)]
+    first  = months[0]
+    prev   = _prev_month(period)
+    series = {key: [None] * len(months) for key in HISTORY_KEYS}
+
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT period, generated_at, data->'kpis' AS kpis
+            FROM executive_reports
+            WHERE status = 'ready' AND period >= %s AND period < %s
+        """, (first, period))
+        stored = {r["period"]: r for r in cur.fetchall()}
+
+    live_incidents: dict[date, int] = {}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT MIN(created_at) AS first FROM sentinel_incidents")
+            s1_first = cur.fetchone()["first"]
+            cur.execute("""
+                SELECT date_trunc('month', created_at AT TIME ZONE %(tz)s)::date AS m, COUNT(*) AS n
+                FROM sentinel_incidents
+                WHERE created_at >= %(start)s AND created_at < %(end)s
+                GROUP BY 1
+            """, {"tz": TZ_NAME, "start": month_bounds(first)[0], "end": month_bounds(period)[0]})
+            counts = {r["m"]: r["n"] for r in cur.fetchall()}
+        if s1_first is not None:
+            for m in months[:-1]:
+                if s1_first <= month_bounds(m)[0]:
+                    live_incidents[m] = counts.get(m, 0)
+    except Exception as exc:
+        conn.rollback()
+        logger.warning(f"[exec-report] historial de SentinelOne falló: {exc}")
+
+    for i, m in enumerate(months):
+        if m == period:
+            values = kpis
+        else:
+            values = {}
+            row = stored.get(m)
+            m_end = month_bounds(m)[1]
+            if row and row["kpis"] and row["generated_at"] and row["generated_at"] >= m_end:
+                values = dict(row["kpis"])
+                # Foto del momento: solo vale si se tomó poco después del cierre
+                if row["generated_at"] > m_end + timedelta(days=SNAPSHOT_MAX_DAYS):
+                    values["open_risks"] = None
+            if m == prev:
+                values = {**values, **{k: v for k, v in prev_kpis.items() if v is not None}}
+            if values.get("incidents") is None and m in live_incidents:
+                values["incidents"] = live_incidents[m]
+        for key in HISTORY_KEYS:
+            series[key][i] = values.get(key)
+
+    return {"months": [m.isoformat() for m in months], "series": series}
+
+
 def collect_report_data(period: date) -> dict:
     start, end = month_bounds(period)
     now = datetime.now(TZ)
@@ -517,6 +592,7 @@ def collect_report_data(period: date) -> dict:
         }
         data["kpis"]      = _kpis(data)
         data["prev_kpis"] = _previous_kpis(conn, period)
+        data["history"]   = _history(conn, period, data["kpis"], data["prev_kpis"])
     finally:
         conn.close()
 
@@ -788,6 +864,126 @@ def _severity_bar(counts: dict) -> str:
             f'</td></tr>')
 
 
+C_BAR_CURRENT = "#123f7a"   # mes del reporte: mismo tono, más oscuro
+TREND_HEIGHT  = 110         # alto máximo de las columnas, en px
+
+
+def _short(n: int | float) -> str:
+    """Cifra compacta para etiquetas de columnas: 807 mil, 1.2 M."""
+    n = int(n)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}".rstrip("0").rstrip(".") + " M"
+    if n >= 10_000:
+        return f"{round(n / 1000)} mil"
+    return _fmt(n)
+
+
+def _trend_chart(months: list[date], values: list, partial: bool, bad_when_up: bool,
+                 missing_note: str) -> str:
+    """
+    Columnas verticales por mes (tablas, compatibles con correo). El mes del
+    reporte va más oscuro y en negritas; los meses sin datos dicen "s/d".
+    Los meses iniciales sin datos se omiten (el historial se va llenando) y el
+    ancho de columna es fijo, para que todas las gráficas se vean iguales.
+    """
+    slots = len(months)
+    skip = next(i for i, v in enumerate(values) if v is not None)
+    months, values = months[skip:], values[skip:]
+    known = [v for v in values if v is not None]
+    top = max(known) or 1
+    last = len(values) - 1
+
+    bars, labels = [], []
+    for i, (m, v) in enumerate(zip(months, values)):
+        current = i == last
+        weight = "700" if current else "400"
+        if v is None:
+            bar = (f'<div style="{FONT}font-size:10px;color:{C_MUTED};padding-bottom:2px">s/d</div>')
+        else:
+            h = max(3, round(v * TREND_HEIGHT / top)) if v else 1
+            color = C_BAR_CURRENT if current else C_BAR
+            bar = (f'<div style="{FONT}font-size:10px;font-weight:{weight};color:{C_INK};padding-bottom:3px;white-space:nowrap">{_short(v)}</div>'
+                   f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
+                   f'<td height="{h}" bgcolor="{color}" style="height:{h}px;background:{color};border-radius:3px 3px 0 0;font-size:0;line-height:0">&nbsp;</td>'
+                   f'</tr></table>')
+        bars.append(f'<td width="{100 // slots}%" height="{TREND_HEIGHT + 22}" valign="bottom" align="center" '
+                    f'style="height:{TREND_HEIGHT + 22}px;padding:0 3px;vertical-align:bottom">{bar}</td>')
+        mark = "*" if current and partial else ""
+        labels.append(f'<td align="center" style="{FONT}font-size:10px;font-weight:{weight};color:{C_INK if current else C_MUTED};'
+                      f'padding:5px 0 0 0;border-top:1px solid {C_HAIR};white-space:nowrap">'
+                      f'{MONTHS_ES[m.month - 1][:3]}{mark}<br/>{m.year % 100:02d}</td>')
+
+    # Lectura en una línea: el mes contra el promedio de los meses anteriores con datos
+    prev_known = [v for v in values[:-1] if v is not None]
+    curr = values[-1]
+    notes = []
+    if prev_known and curr is not None:
+        avg = sum(prev_known) / len(prev_known)
+        months_txt = "mes anterior" if len(prev_known) == 1 else f"{len(prev_known)} meses anteriores"
+        line = f"Promedio de los {months_txt}: <b>{_fmt(round(avg))}</b>." if len(prev_known) > 1 \
+            else f"Valor del {months_txt}: <b>{_fmt(round(avg))}</b>."
+        if avg and not partial:
+            pct = round((curr - avg) * 100 / avg)
+            if pct == 0:
+                line += " Este mes quedó en el promedio."
+            else:
+                if bad_when_up is None:     # más bloqueos no es ni bueno ni malo
+                    color = C_INK
+                else:
+                    color = "#b42318" if (pct > 0) == bad_when_up else "#067647"
+                word = "por encima" if pct > 0 else "por debajo"
+                line += (f' Este mes quedó <span style="color:{color};font-weight:600">'
+                         f'{"▲" if pct > 0 else "▼"} {abs(pct)}% {word}</span>.')
+        notes.append(line)
+    if partial:
+        notes.append("* Mes en curso: cifra parcial, no comparable todavía.")
+    if skip:
+        m0 = months[0]
+        notes.append(f"Historial disponible desde {MONTHS_ES[m0.month - 1]} {m0.year}; "
+                     f"se irá completando mes a mes hasta cubrir {slots} meses.")
+    if any(v is None for v in values):
+        notes.append(f"s/d: sin datos de ese mes ({missing_note}).")
+    notes_html = "".join(f'<div style="{FONT}font-size:12px;color:{C_MUTED};margin-top:6px;line-height:1.4">{n}</div>'
+                         for n in notes)
+    filler = (f'<td width="{100 - (100 // slots) * len(values)}%" style="font-size:0;line-height:0">&nbsp;</td>'
+              if len(values) < slots else "")
+
+    return (f'<tr><td style="padding:0 32px 4px 32px">'
+            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
+            f'<tr>{"".join(bars)}{filler}</tr><tr>{"".join(labels)}{filler}</tr></table>'
+            f'{notes_html}</td></tr>')
+
+
+def _history_section(data: dict) -> list[str]:
+    """Gráficas de comparación con meses anteriores. Solo las series con ≥2 meses con datos."""
+    hist = data.get("history")   # los reportes guardados antes de esta función no la traen
+    if not hist:
+        return []
+    months = [date.fromisoformat(m) for m in hist["months"]]
+    charts = [
+        ("blocked",    "Amenazas bloqueadas en la red", "Registros de los firewalls FortiGate por mes", None,
+         "el detalle de los firewalls se conserva 60 días; los meses anteriores salen de los reportes ya generados"),
+        ("incidents",  "Incidentes en computadoras", "Detectados por SentinelOne por mes", True,
+         "no hay reporte guardado y el detalle ya no cubre el mes completo"),
+        ("open_risks", "Vulnerabilidades críticas y altas abiertas",
+         "Aplicaciones propias y servicios expuestos en la red, al cierre de cada mes", True,
+         "es una foto al cierre del mes: solo existe si el reporte se generó en los primeros "
+         f"{SNAPSHOT_MAX_DAYS} días del mes siguiente"),
+    ]
+    out: list[str] = []
+    for key, title, subtitle, bad_when_up, missing_note in charts:
+        values = hist["series"].get(key) or []
+        if sum(v is not None for v in values) < 2:
+            continue
+        out.append(_section_title(title, subtitle))
+        out.append(_trend_chart(months, values, data["partial"], bad_when_up, missing_note))
+    if out:
+        n = len(months)
+        out.insert(0, f'<tr><td style="padding:28px 32px 0 32px"><div style="{FONT}font-size:12px;color:{C_MUTED};'
+                      f'text-transform:uppercase;letter-spacing:.08em">Comparación con meses anteriores · últimos {n} meses</div></td></tr>')
+    return out
+
+
 def _kpi_tile(value, label: str, delta_html: str) -> str:
     return (f'<td width="50%" valign="top" style="padding:6px">'
             f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
@@ -873,6 +1069,9 @@ def build_report_html(data: dict) -> str:
               {_kpi_tile(k['pending'], 'Incidentes pendientes de atender', f'<span style="color:{C_MUTED}">al cierre del reporte</span>')}</tr>
         </table>
       </td></tr>""")
+
+    # Tendencia: comparación con los meses anteriores (máx. 12)
+    body.extend(_history_section(data))
 
     # Amenazas más importantes
     top = data["highlights"][:5]

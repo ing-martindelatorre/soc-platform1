@@ -207,6 +207,12 @@ el scheduler (`exec_report_job`).
   importantes (nivel, cifra, qué pasó y qué se recomienda). El nivel de riesgo
   del mes sale de ahí: **alto** si hay algo crítico (p.ej. ransomware pendiente),
   **medio** si hay algo importante, **bajo** en otro caso.
+- `_history(...)` / `_history_section(data)`: serie mensual de KPIs
+  (`HISTORY_MONTHS = 12`, `HISTORY_KEYS`) guardada en `data["history"]` y sus
+  gráficas de comparación. Fuente por mes: reporte guardado de ese mes →
+  SentinelOne en vivo. No regeneres reportes de meses viejos sin necesidad: el
+  `generated_at` nuevo invalida su foto de vulnerabilidades abiertas
+  (`SNAPSHOT_MAX_DAYS`) y Fortinet ya no tendrá el detalle para recalcularlos.
 - Las traducciones a lenguaje no técnico (`FORTI_CATEGORIES`,
   `SENTINEL_CLASSES`, `VIRUS_FAMILIES`, `NMAP_SERVICES`, `PIRACY_PATTERN`) están
   al inicio del archivo; amplíalas ahí.

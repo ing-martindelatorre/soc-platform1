@@ -109,6 +109,15 @@ parcial. La comparación con el mes anterior usa el reporte guardado de ese mes;
 si no existe se recalcula, pero Fortinet solo se compara si la retención (60
 días) aún cubre ese mes completo.
 
+El reporte incluye además la sección **Comparación con meses anteriores**:
+columnas por mes (hasta 12, incluido el del reporte) de amenazas bloqueadas,
+incidentes de SentinelOne y vulnerabilidades críticas/altas abiertas, con el
+mes contra el promedio de los anteriores. Cada mes sale del reporte guardado de
+ese mes (generado ya cerrado); SentinelOne se recalcula en vivo si su retención
+aún cubre el mes. Por la retención corta de Fortinet, el histórico de bloqueos
+se va llenando conforme se generan reportes mensuales; los meses iniciales sin
+datos se omiten y una serie con menos de 2 meses no se grafica.
+
 ### Crear o editar una regla
 
 Campos requeridos: `name`, `module`, `condition_field`, `condition_value`,
