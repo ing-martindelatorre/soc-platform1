@@ -173,6 +173,13 @@ ACTION_ITEMS = {
         "Actualiza la dependencia vulnerable si hay versión disponible",
         "Evalúa el impacto en los sistemas de producción",
     ],
+    "nmap_kev": [
+        "Prioriza el parche: CISA confirma explotación activa de estas vulnerabilidades",
+        "Actualiza el servicio afectado a una versión corregida o aplica la mitigación del fabricante",
+        "Si no se puede parchear de inmediato, restringe el acceso al puerto (firewall/VPN)",
+        "Revisa logs del servicio en busca de indicios de explotación previa",
+        "Si se detectó por versión, confirma con el sistema operativo si hay parche backporteado",
+    ],
     "nmap": [
         "Revisa el activo con el hallazgo crítico",
         "Verifica si el puerto/servicio es necesario",
@@ -416,7 +423,43 @@ QUERIES = {
             ORDER BY event_count DESC
             LIMIT 20
         """,
+        # CVEs abiertos del catálogo CISA KEV (explotados activamente).
+        # condition_value: 'all' = todos los KEV; 'ransomware' = sólo los
+        # usados en campañas de ransomware. Ventana de 24 h sobre last_seen
+        # (el escaneo que los vio); la deduplicación por entidad usa
+        # ENTITY_DEDUP_MINUTES para no repetir el aviso en cada ciclo.
+        "kev": """
+            SELECT
+                a.ip || ':' || v.port                 AS source_label,
+                v.vuln_id                             AS detail,
+                COALESCE(v.severity, 'high')          AS severity,
+                1                                     AS event_count,
+                v.first_seen                          AS first_seen,
+                v.last_seen                           AS last_seen,
+                TRIM(COALESCE(v.product, '') || ' ' || COALESCE(v.version, ''))
+                    || CASE WHEN v.kev_ransomware THEN ' · usado en ransomware' ELSE '' END
+                    || CASE WHEN v.detection = 'version' THEN ' · detectado por versión' ELSE '' END
+                                                      AS extra,
+                COALESCE(NULLIF(a.hostname, ''), a.ip) AS asset_name
+            FROM nmap_vulnerabilities v
+            JOIN nmap_assets a ON v.asset_id = a.id
+            WHERE v.status = 'open'
+              AND v.in_kev
+              AND v.nvd_affected IS NOT FALSE
+              AND (LOWER(%s) <> 'ransomware' OR v.kev_ransomware)
+              AND v.last_seen >= NOW() - INTERVAL '24 hours'
+            ORDER BY v.kev_ransomware DESC, v.cvss DESC NULLS LAST, a.ip
+            LIMIT 20
+        """,
     },
+}
+
+# Ventana de deduplicación por entidad distinta del cooldown de la regla.
+# Las vulnerabilidades KEV siguen abiertas hasta que se parchean: sin esto,
+# cada vez que vence el cooldown se volvería a avisar de las mismas. Con 30
+# días se avisa una vez y se recuerda mensualmente si siguen abiertas.
+ENTITY_DEDUP_MINUTES = {
+    ("nmap", "kev"): 30 * 24 * 60,
 }
 
 _SEVERITY_RANK = {
@@ -706,7 +749,7 @@ def evaluate_and_send() -> int:
                   AND sent_at >= NOW() - make_interval(mins => %s)
                   AND status = 'sent'
                 """,
-                (dedup_keys, cooldown),
+                (dedup_keys, max(cooldown, ENTITY_DEDUP_MINUTES.get((module, field), 0))),
             )
             already_alerted = {row["dedup_key"] for row in cur.fetchall()}
 

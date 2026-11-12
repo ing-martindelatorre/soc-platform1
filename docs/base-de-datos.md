@@ -44,6 +44,7 @@ idempotente.
 | 026 | `replication_targets`, `replication_watermarks` (replicación remota) |
 | 027 | `executive_report_config`, `executive_reports`, `executive_report_sends` (reportes ejecutivos mensuales) |
 | 028 | `nmap_vulnerabilities` (CVEs reales y vulnerabilidades confirmadas por NSE) |
+| 029 | Regla de alerta `nmap` / `kev` (vulnerabilidades CISA KEV) |
 
 ## Tablas por dominio
 
