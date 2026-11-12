@@ -11,6 +11,7 @@ Servidor único del SOC Platform.
 
 import json
 import os
+import re
 import secrets
 import sys
 import threading
@@ -140,6 +141,19 @@ def _check_auth(token: str) -> bool:
     return True
 
 
+_EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
+
+
+def _parse_recipients(value) -> list[str] | None:
+    """Lista o texto separado por comas/saltos de línea → correos. None si alguno es inválido."""
+    if isinstance(value, str):
+        value = re.split(r"[,;\s]+", value)
+    emails = [str(v).strip() for v in (value or []) if str(v).strip()]
+    if any(not _EMAIL_RE.match(e) for e in emails):
+        return None
+    return list(dict.fromkeys(emails))
+
+
 def _create_session() -> str:
     token = secrets.token_hex(32)
     _sessions[token] = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
@@ -265,6 +279,97 @@ def refresh_sentinel():
 # =============================================================================
 # NMAP
 # =============================================================================
+def _fetch_nmap_vulns(cur) -> dict:
+    """
+    Vulnerabilidades reales abiertas (tabla nmap_vulnerabilities, migración 028):
+    CVEs por versión agrupados por servicio, y las confirmadas por NSE una a una.
+    Si la migración no está aplicada devuelve available=False.
+    """
+    cur.execute("SELECT to_regclass('public.nmap_vulnerabilities') AS t")
+    if not cur.fetchone()["t"]:
+        return {"available": False}
+
+    cur.execute("""
+        SELECT a.ip, COALESCE(a.hostname,'') AS hostname, v.port, v.protocol,
+               COALESCE(v.product,'') AS product, COALESCE(v.version,'') AS version,
+               COUNT(*)                                            AS total,
+               COUNT(*) FILTER (WHERE v.severity = 'critical')     AS critical,
+               COUNT(*) FILTER (WHERE v.severity = 'high')         AS high,
+               COUNT(*) FILTER (WHERE v.in_kev)                    AS kev,
+               COUNT(*) FILTER (WHERE v.kev_ransomware)            AS ransomware,
+               MAX(v.cvss)                                         AS max_cvss,
+               MAX(v.last_seen)                                    AS last_seen,
+               (ARRAY_AGG(v.vuln_id || '|' || COALESCE(v.cvss::text,'') || '|' || v.in_kev::text
+                          ORDER BY v.in_kev DESC, v.cvss DESC NULLS LAST, v.vuln_id DESC))[1:10] AS top
+        FROM nmap_vulnerabilities v JOIN nmap_assets a ON a.id = v.asset_id
+        WHERE v.status = 'open' AND v.detection = 'version'
+        GROUP BY a.ip, a.hostname, v.port, v.protocol, v.product, v.version
+        ORDER BY COUNT(*) FILTER (WHERE v.in_kev) DESC, MAX(v.cvss) DESC NULLS LAST, COUNT(*) DESC
+    """)
+    by_service = []
+    for r in cur.fetchall():
+        top = []
+        for item in r["top"] or []:
+            vid, cvss, kev = item.split("|")
+            top.append({"id": vid, "cvss": float(cvss) if cvss else None, "kev": kev == "true"})
+        by_service.append({
+            "ip": r["ip"], "hostname": r["hostname"], "port": r["port"], "protocol": r["protocol"],
+            "product": r["product"], "version": r["version"], "total": r["total"],
+            "critical": r["critical"], "high": r["high"], "kev": r["kev"], "ransomware": r["ransomware"],
+            "max_cvss": float(r["max_cvss"]) if r["max_cvss"] is not None else None,
+            "last_seen": str(r["last_seen"])[:16], "top": top,
+        })
+
+    cur.execute("""
+        SELECT a.ip, COALESCE(a.hostname,'') AS hostname, v.port, v.protocol, v.vuln_id, v.is_cve,
+               v.cvss, v.severity, v.detection, v.in_kev, COALESCE(v.title,'') AS title,
+               COALESCE(v.product,'') AS product, COALESCE(v.version,'') AS version,
+               COALESCE(v.script_name,'') AS script_name, COALESCE(v.reference_url,'') AS reference_url,
+               v.first_seen, v.last_seen
+        FROM nmap_vulnerabilities v JOIN nmap_assets a ON a.id = v.asset_id
+        WHERE v.status = 'open' AND v.detection <> 'version'
+        ORDER BY (v.detection = 'confirmed') DESC, v.cvss DESC NULLS LAST, a.ip, v.port
+    """)
+    confirmed = [
+        {**{k: r[k] for k in ("ip", "hostname", "port", "protocol", "vuln_id", "is_cve", "severity",
+                              "detection", "in_kev", "title", "product", "version", "script_name", "reference_url")},
+         "cvss": float(r["cvss"]) if r["cvss"] is not None else None,
+         "first_seen": str(r["first_seen"])[:10], "last_seen": str(r["last_seen"])[:16]}
+        for r in cur.fetchall()
+    ]
+
+    cur.execute("""
+        SELECT COUNT(DISTINCT vuln_id) FILTER (WHERE is_cve)                          AS cves,
+               COUNT(*) FILTER (WHERE severity = 'critical')                           AS critical,
+               COUNT(DISTINCT vuln_id) FILTER (WHERE in_kev)                           AS kev,
+               COUNT(DISTINCT asset_id) FILTER (WHERE in_kev)                          AS kev_hosts,
+               COUNT(*) FILTER (WHERE detection <> 'version')                          AS confirmed,
+               COUNT(DISTINCT asset_id)                                                AS hosts,
+               MAX(last_seen)                                                          AS last_scan
+        FROM nmap_vulnerabilities WHERE status = 'open'
+    """)
+    k = cur.fetchone()
+    cur.execute("SELECT COUNT(*) AS n FROM nmap_vulnerabilities WHERE status = 'resolved'")
+    resolved = cur.fetchone()["n"]
+
+    return {
+        "available": True,
+        "kpis": {
+            "cves": k["cves"] or 0, "critical": k["critical"] or 0, "kev": k["kev"] or 0, "kev_hosts": k["kev_hosts"] or 0,
+            "confirmed": k["confirmed"] or 0, "hosts": k["hosts"] or 0, "resolved": resolved,
+            "last_scan": str(k["last_scan"])[:16] if k["last_scan"] else None,
+        },
+        "by_service": by_service,
+        "confirmed": confirmed,
+    }
+
+
+def _embed_json(data: dict) -> str:
+    """JSON para incrustar en <script>: escapa '</' para que datos de los
+    escaneos (títulos, banners) no puedan cerrar la etiqueta."""
+    return json.dumps(data, ensure_ascii=False, default=str).replace("</", "<\\/")
+
+
 def build_nmap_data() -> dict:
     with db_connect() as conn:
         with conn.cursor() as cur:
@@ -292,6 +397,8 @@ def build_nmap_data() -> dict:
                 ORDER BY f.created_at DESC
             """)
             findings = cur.fetchall()
+
+            vulns = _fetch_nmap_vulns(cur)
 
     sev_counter  = Counter(f["severity"] or "unknown" for f in findings)
     port_counter = Counter(str(s["port"]) for s in services if s["port"])
@@ -334,6 +441,7 @@ def build_nmap_data() -> dict:
              "status": r["status"], "ip": r["ip"]}
             for r in findings
         ],
+        "vulns": vulns,
         "summary": {"text": f"Se detectaron {len(assets)} activos, {len(services)} servicios y {len(findings)} hallazgos."},
         "_health": {
             "high_findings":     sev_counter.get("high", 0),
@@ -349,7 +457,7 @@ def refresh_nmap():
             data   = build_nmap_data()
             health = data.pop("_health", {})
             template = (BASE_DIR / "nmap_dashboard.html").read_text(encoding="utf-8")
-            html = template.replace("{{DATA}}", json.dumps(data, ensure_ascii=False, default=str))
+            html = template.replace("{{DATA}}", _embed_json(data))
             (BASE_DIR / "nmap_dashboard_output.html").write_text(html, encoding="utf-8")
             update_status("nmap", "ok", data["kpis"]["assets"], health)
             print(f"[nmap] OK — {data['kpis']['assets']} activos, high={health.get('high_findings',0)} | {now_str()}")
@@ -1197,6 +1305,65 @@ class SOCHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
 
+        elif path == "/api/config/exec-reports":
+            if not self._require_auth():
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        # Sin html/data completos: solo lo que necesita la tabla del panel
+                        cur.execute("""
+                            SELECT r.id, r.period, r.status, r.error, r.started_at, r.generated_at,
+                                   r.data->>'risk_level' AS risk_level,
+                                   (r.data->>'partial')::boolean AS partial,
+                                   s.sent_at AS last_sent_at, s.status AS last_send_status,
+                                   s.recipients AS last_recipients, s.trigger AS last_trigger
+                            FROM executive_reports r
+                            LEFT JOIN LATERAL (
+                                SELECT sent_at, status, recipients, trigger
+                                FROM executive_report_sends
+                                WHERE report_id = r.id ORDER BY sent_at DESC LIMIT 1
+                            ) s ON TRUE
+                            ORDER BY r.period DESC
+                        """)
+                        reports = [dict(r) for r in cur.fetchall()]
+                        cur.execute("SELECT * FROM executive_report_config WHERE id = 1")
+                        cfg = cur.fetchone()
+                self._send_json({"ok": True, "reports": reports, "config": dict(cfg) if cfg else None})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif path.startswith("/api/config/exec-reports/") and path.endswith("/html"):
+            if not self._require_auth():
+                return
+            try:
+                report_id = int(path.split("/")[-2])
+            except ValueError:
+                self._send_json({"ok": False, "error": "Id inválido"}, 400)
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT period, html FROM executive_reports WHERE id = %s AND status = 'ready'", (report_id,))
+                        row = cur.fetchone()
+                if not row or not row["html"]:
+                    self._send_json({"ok": False, "error": "Reporte no disponible"}, 404)
+                    return
+                body = row["html"].encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                # El reporte es HTML estático: sin scripts ni recursos externos
+                self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                if "download=1" in self.path:
+                    self.send_header("Content-Disposition",
+                                     f'attachment; filename="reporte_ejecutivo_{row["period"]:%Y-%m}.html"')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
         else:
             self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
 
@@ -1367,6 +1534,46 @@ class SOCHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
 
+        elif path == "/api/config/exec-reports/generate":
+            body = self._read_body()
+            try:
+                sys.path.insert(0, str(BASE_DIR.parent))
+                from app.reports.executive import parse_period, start_generation, build_and_store
+                period = parse_period(body.get("period") or None)
+            except ValueError as e:
+                self._send_json({"ok": False, "error": str(e)}, 400)
+                return
+            try:
+                report_id, started = start_generation(period)
+                if started:
+                    # Tarda minutos (agrega millones de filas de Fortinet): se genera en segundo plano
+                    threading.Thread(target=build_and_store, args=(report_id, period),
+                                     daemon=True, name=f"exec-report-{period:%Y-%m}").start()
+                self._send_json({"ok": True, "id": report_id, "started": started})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif path.startswith("/api/config/exec-reports/") and path.endswith("/send"):
+            body = self._read_body()
+            try:
+                report_id = int(path.split("/")[-2])
+            except ValueError:
+                self._send_json({"ok": False, "error": "Id inválido"}, 400)
+                return
+            recipients = _parse_recipients(body.get("recipients"))
+            if recipients is None:
+                self._send_json({"ok": False, "error": "Hay correos con formato inválido"}, 400)
+                return
+            if not recipients:
+                self._send_json({"ok": False, "error": "Indica al menos un destinatario"}, 400)
+                return
+            try:
+                sys.path.insert(0, str(BASE_DIR.parent))
+                from app.reports.executive import send_report
+                self._send_json(send_report(report_id, recipients, trigger="manual"))
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
         else:
             self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
 
@@ -1409,6 +1616,40 @@ class SOCHandler(SimpleHTTPRequestHandler):
                         if cur.rowcount == 0:
                             self._send_json({"ok": False, "error": "Regla no encontrada"}, 404)
                             return
+                    conn.commit()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+        elif path == "/api/config/exec-reports-config":
+            body       = self._read_body()
+            recipients = _parse_recipients(body.get("recipients"))
+            if recipients is None:
+                self._send_json({"ok": False, "error": "Hay correos con formato inválido"}, 400)
+                return
+            try:
+                send_day  = int(body.get("send_day", 1))
+                send_hour = int(body.get("send_hour", 8))
+            except (TypeError, ValueError):
+                self._send_json({"ok": False, "error": "Día u hora inválidos"}, 400)
+                return
+            if not (1 <= send_day <= 28 and 0 <= send_hour <= 23):
+                self._send_json({"ok": False, "error": "El día debe estar entre 1 y 28 y la hora entre 0 y 23"}, 400)
+                return
+            enabled = bool(body.get("enabled", False))
+            if enabled and not recipients:
+                self._send_json({"ok": False, "error": "Para activar el envío automático indica al menos un destinatario"}, 400)
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO executive_report_config (id, enabled, recipients, send_day, send_hour, updated_at)
+                            VALUES (1, %s, %s, %s, %s, NOW())
+                            ON CONFLICT (id) DO UPDATE
+                                SET enabled = EXCLUDED.enabled, recipients = EXCLUDED.recipients,
+                                    send_day = EXCLUDED.send_day, send_hour = EXCLUDED.send_hour,
+                                    updated_at = NOW()
+                        """, (enabled, recipients, send_day, send_hour))
                     conn.commit()
                 self._send_json({"ok": True})
             except Exception as e:
@@ -1526,6 +1767,20 @@ class SOCHandler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": True})
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
+        elif path.startswith("/api/config/exec-reports/"):
+            try:
+                report_id = int(path.split("/")[-1])
+            except ValueError:
+                self._send_json({"ok": False, "error": "Id inválido"}, 400)
+                return
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM executive_reports WHERE id = %s", (report_id,))
+                    conn.commit()
+                self._send_json({"ok": True})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
         else:
             self._send_json({"ok": False, "error": "Endpoint no encontrado"}, 404)
 
@@ -1581,7 +1836,7 @@ def main():
                 data   = build_nmap_data()
                 health = data.pop("_health", {})
                 template = (BASE_DIR / "nmap_dashboard.html").read_text(encoding="utf-8")
-                html = template.replace("{{DATA}}", json.dumps(data, ensure_ascii=False, default=str))
+                html = template.replace("{{DATA}}", _embed_json(data))
                 (BASE_DIR / "nmap_dashboard_output.html").write_text(html, encoding="utf-8")
                 update_status("nmap", "ok", data["kpis"]["assets"], health)
             elif name == "fortinet_threats":

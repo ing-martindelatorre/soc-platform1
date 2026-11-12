@@ -138,7 +138,7 @@
 
     /* ── TABS ─────────────────────────────────────────────────────────────── */
     .nav-tabs {
-      display: flex; gap: 4px; margin-bottom: 24px;
+      display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 24px;
       border-bottom: 1px solid var(--border); padding-bottom: 0;
     }
 
@@ -327,6 +327,7 @@
       <button class="nav-tab" onclick="showTab('smtp')">Configuración SMTP</button>
       <button class="nav-tab" onclick="showTab('schedules')">Frecuencias de Recolección</button>
       <button class="nav-tab" onclick="showTab('replication')">Replicación remota</button>
+      <button class="nav-tab" onclick="showTab('reports')">Reportes Ejecutivos</button>
     </div>
 
     <!-- ── TAB: REGLAS ──────────────────────────────────────────────────── -->
@@ -592,6 +593,102 @@
       </div>
     </div>
 
+    <!-- ── TAB: REPORTES EJECUTIVOS ─────────────────────────────────────── -->
+    <div class="tab-pane" id="tab-reports">
+      <div class="panel">
+        <div class="panel-title">Generar reporte ejecutivo mensual</div>
+        <p style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);margin:16px 0">
+          Resumen para gerencia de las amenazas más importantes del mes, con gráficas y lenguaje no técnico
+          (FortiGate, SentinelOne, Snyk, Nmap y cPanel). La generación tarda entre 2 y 5 minutos porque
+          agrega todos los registros del mes; puedes seguir usando el panel mientras tanto.
+          Si eliges el mes en curso, el reporte sale marcado como parcial.
+        </p>
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <div class="field">
+            <label>Mes a reportar</label>
+            <input type="month" id="er-period"/>
+          </div>
+          <button class="btn btn-accent" id="btn-er-generate" onclick="generateExecReport()">Generar reporte</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Reportes generados</div>
+          <button class="btn btn-muted" onclick="loadExecReports()">Actualizar</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Periodo</th>
+                <th>Estado</th>
+                <th>Nivel de riesgo</th>
+                <th>Generado</th>
+                <th>Último envío</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="er-body">
+              <tr><td colspan="6"><div class="empty-state"><div class="empty-icon">📊</div>Cargando reportes...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="er-preview-panel" style="display:none">
+        <div class="panel-header">
+          <div class="panel-title" id="er-preview-title">Vista previa</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-muted" onclick="printExecReport()">Imprimir / PDF</button>
+            <a class="btn btn-muted" id="er-download" href="#" style="text-decoration:none">Descargar HTML</a>
+            <button class="btn btn-muted" onclick="closeExecPreview()">Cerrar</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+          <div class="field" style="flex:1;min-width:260px">
+            <label>Enviar a (separa los correos con coma)</label>
+            <input type="text" id="er-send-to" placeholder="gerencia@tuempresa.com, direccion@tuempresa.com"/>
+          </div>
+          <button class="btn btn-green" id="btn-er-send" onclick="sendExecReport()">Enviar por correo</button>
+        </div>
+        <iframe id="er-frame" title="Vista previa del reporte ejecutivo" sandbox="allow-same-origin allow-modals"
+                style="width:100%;height:900px;border:1px solid var(--border);border-radius:8px;background:#f3f4f6"></iframe>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Envío automático mensual</div>
+          <label class="toggle">
+            <input type="checkbox" id="er-enabled"/>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <p style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);margin-bottom:16px">
+          Cada mes, en el día y hora indicados, el scheduler genera el reporte del mes anterior y lo envía
+          a estos destinatarios (una sola vez por mes; si el scheduler estaba detenido a esa hora, lo envía
+          en cuanto vuelva a correr). Usa la configuración SMTP del <strong style="color:var(--accent)">.env</strong>.
+        </p>
+        <div class="form-grid three">
+          <div class="field form-full">
+            <label>Destinatarios (separa los correos con coma)</label>
+            <textarea id="er-recipients" placeholder="gerencia@tuempresa.com, direccion@tuempresa.com"></textarea>
+          </div>
+          <div class="field">
+            <label>Día del mes</label>
+            <select id="er-day"></select>
+          </div>
+          <div class="field">
+            <label>Hora (México)</label>
+            <select id="er-hour"></select>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-green" onclick="saveExecReportConfig()">Guardar configuración</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -655,6 +752,7 @@ function showApp() {
   loadSchedules();
   loadReplicationTables();
   loadReplicationTargets();
+  loadExecReports();
 }
 
 // Verificar sesión al cargar
@@ -685,7 +783,7 @@ function showTab(name) {
   document.querySelectorAll('.tab-pane').forEach(p => p.className = 'tab-pane');
   document.querySelectorAll('.nav-tab').forEach(t => t.className = 'nav-tab');
   document.getElementById('tab-' + name).className = 'tab-pane active';
-  const tabs = ['rules','new-rule','log','smtp','schedules','replication'];
+  const tabs = ['rules','new-rule','log','smtp','schedules','replication','reports'];
   document.querySelectorAll('.nav-tab')[tabs.indexOf(name)].className = 'nav-tab active';
 }
 
@@ -721,9 +819,10 @@ const MODULE_OPTIONS = {
     }
   },
   nmap: {
-    fields: ['severity'],
+    fields: ['severity', 'kev'],
     values: {
       severity: ['critical','high','medium','low'],
+      kev:      ['all','ransomware'],
     }
   },
 };
@@ -869,7 +968,7 @@ async function saveRule() {
   const thresholdCount = parseInt(document.getElementById('r-threshold').value) || 1;
   const subject        = document.getElementById('r-subject').value.trim();
   const recipients     = document.getElementById('r-recipients').value
-    .split('\n').map(e => e.trim()).filter(Boolean);
+    .split(/[\n,;]+/).map(e => e.trim()).filter(Boolean);
 
   if (!name || !subject || !recipients.length) {
     showToast('Completa todos los campos requeridos', 'error');
@@ -1219,6 +1318,199 @@ async function testReplicationTarget(id) {
     const res  = await fetch(`/api/config/replication-targets/${id}/test`, { method: 'POST', headers: authHeaders() });
     const data = await res.json();
     showToast(data.ok ? (data.message || 'Conexión exitosa') : (data.error || 'Error de conexión'), data.ok ? 'success' : 'error');
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  }
+}
+
+// ─── REPORTES EJECUTIVOS ──────────────────────────────────────────────────────
+const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+let _execReports   = [];
+let _execPreviewId = null;
+let _execPollTimer = null;
+
+function execPeriodLabel(period) {
+  const [y, m] = String(period).split('-').map(Number);
+  const name = MONTHS_ES[m - 1];
+  return name.charAt(0).toUpperCase() + name.slice(1) + ' ' + y;
+}
+
+function initExecReportForm() {
+  const now  = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const el   = document.getElementById('er-period');
+  if (!el.value) el.value = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
+  el.max = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  const day = document.getElementById('er-day');
+  if (!day.options.length) {
+    day.innerHTML = Array.from({length: 28}, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('');
+    document.getElementById('er-hour').innerHTML =
+      Array.from({length: 24}, (_, i) => `<option value="${i}">${String(i).padStart(2, '0')}:00</option>`).join('');
+  }
+}
+
+async function loadExecReports() {
+  initExecReportForm();
+  clearTimeout(_execPollTimer);
+  try {
+    const res  = await fetch('/api/config/exec-reports', { headers: authHeaders() });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    _execReports = data.reports || [];
+    renderExecReports(_execReports);
+    if (data.config) fillExecConfig(data.config);
+    // Mientras haya reportes generándose, refrescar el estado
+    if (_execReports.some(r => r.status === 'generating')) {
+      _execPollTimer = setTimeout(loadExecReports, 10000);
+    }
+  } catch(e) {
+    document.getElementById('er-body').innerHTML =
+      '<tr><td colspan="6"><div class="empty-state">Error cargando reportes. ¿Aplicaste la migración 027_executive_reports.sql?</div></td></tr>';
+  }
+}
+
+function execStatusBadge(r) {
+  if (r.status === 'ready')      return '<span class="badge badge-green">listo</span>' + (r.partial ? ' <span class="badge badge-yellow">parcial</span>' : '');
+  if (r.status === 'generating') return '<span class="badge badge-blue">generando…</span>';
+  return `<span class="badge badge-red" title="${esc(r.error || '')}">error</span>`;
+}
+
+function execRiskBadge(level) {
+  const map = { alto: 'badge-red', medio: 'badge-orange', bajo: 'badge-green' };
+  return level ? `<span class="badge ${map[level] || 'badge-blue'}">${esc(level)}</span>` : '<span style="color:var(--muted)">—</span>';
+}
+
+function renderExecReports(reports) {
+  const tbody = document.getElementById('er-body');
+  if (!reports.length) {
+    tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">📊</div>Aún no hay reportes.<br/>Genera el primero arriba.</div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = reports.map(r => {
+    const generated = r.generated_at ? new Date(r.generated_at).toLocaleString('es-MX') : '—';
+    const lastSend  = r.last_sent_at
+      ? `<span class="badge ${r.last_send_status === 'sent' ? 'badge-green' : 'badge-red'}">${r.last_send_status === 'sent' ? 'enviado' : 'falló'}</span>
+         <span style="color:var(--muted)">${new Date(r.last_sent_at).toLocaleString('es-MX')} · ${r.last_trigger === 'auto' ? 'automático' : 'manual'}</span>`
+      : '<span style="color:var(--muted)">— sin enviar —</span>';
+    const ready = r.status === 'ready';
+    return `
+    <tr>
+      <td><strong>${esc(execPeriodLabel(r.period))}</strong></td>
+      <td>${execStatusBadge(r)}</td>
+      <td>${execRiskBadge(r.risk_level)}</td>
+      <td style="color:var(--muted)">${generated}</td>
+      <td>${lastSend}</td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        ${ready ? `<button class="btn btn-accent" style="padding:5px 12px;font-size:10px" onclick="previewExecReport(${r.id})">Ver / Enviar</button>` : ''}
+        ${r.status !== 'generating' ? `<button class="btn btn-muted" style="padding:5px 12px;font-size:10px" onclick="regenerateExecReport('${esc(String(r.period).slice(0, 7))}')">Regenerar</button>` : ''}
+        <button class="btn btn-red" style="padding:5px 12px;font-size:10px" onclick="deleteExecReport(${r.id}, '${esc(execPeriodLabel(r.period))}')">Eliminar</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function generateExecReport(periodOverride) {
+  const period = periodOverride || document.getElementById('er-period').value;
+  if (!period) { showToast('Elige el mes a reportar', 'error'); return; }
+  try {
+    const res  = await fetch('/api/config/exec-reports/generate', {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ period }),
+    });
+    const data = await res.json();
+    if (!data.ok) { showToast(data.error || 'Error al generar', 'error'); return; }
+    showToast(data.started ? 'Generando reporte… tarda unos minutos' : 'Ese reporte ya se está generando');
+    loadExecReports();
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  }
+}
+
+function regenerateExecReport(period) {
+  if (!confirm(`¿Regenerar el reporte de ${execPeriodLabel(period)} con los datos actuales?`)) return;
+  generateExecReport(period);
+}
+
+function previewExecReport(id) {
+  const r = _execReports.find(x => x.id === id);
+  if (!r) return;
+  _execPreviewId = id;
+  document.getElementById('er-preview-title').textContent = 'Vista previa — ' + execPeriodLabel(r.period);
+  document.getElementById('er-frame').src = `/api/config/exec-reports/${id}/html`;
+  document.getElementById('er-download').href = `/api/config/exec-reports/${id}/html?download=1`;
+  const sendTo = document.getElementById('er-send-to');
+  if (!sendTo.value) sendTo.value = document.getElementById('er-recipients').value.trim();
+  const panel = document.getElementById('er-preview-panel');
+  panel.style.display = '';
+  panel.scrollIntoView({ behavior: 'smooth' });
+}
+
+function closeExecPreview() {
+  _execPreviewId = null;
+  document.getElementById('er-preview-panel').style.display = 'none';
+  document.getElementById('er-frame').src = 'about:blank';
+}
+
+function printExecReport() {
+  const frame = document.getElementById('er-frame');
+  try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+  catch(e) { showToast('No se pudo abrir la impresión; usa Descargar HTML', 'error'); }
+}
+
+async function sendExecReport() {
+  if (_execPreviewId === null) return;
+  const recipients = document.getElementById('er-send-to').value.trim();
+  if (!recipients) { showToast('Indica al menos un destinatario', 'error'); return; }
+  const btn = document.getElementById('btn-er-send');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    const res  = await fetch(`/api/config/exec-reports/${_execPreviewId}/send`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ recipients }),
+    });
+    const data = await res.json();
+    showToast(data.ok ? 'Reporte enviado' : (data.error || 'Error al enviar'), data.ok ? 'success' : 'error');
+    loadExecReports();
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Enviar por correo';
+  }
+}
+
+async function deleteExecReport(id, label) {
+  if (!confirm(`¿Eliminar el reporte de ${label}? También se borra su historial de envíos.`)) return;
+  try {
+    await fetch(`/api/config/exec-reports/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (_execPreviewId === id) closeExecPreview();
+    showToast('Reporte eliminado');
+    loadExecReports();
+  } catch(e) {
+    showToast('Error al eliminar', 'error');
+  }
+}
+
+function fillExecConfig(cfg) {
+  // No pisar lo que el usuario esté editando en un refresco automático
+  if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#tab-reports .form-grid')) return;
+  document.getElementById('er-enabled').checked  = !!cfg.enabled;
+  document.getElementById('er-recipients').value = (cfg.recipients || []).join(', ');
+  document.getElementById('er-day').value        = cfg.send_day;
+  document.getElementById('er-hour').value       = cfg.send_hour;
+}
+
+async function saveExecReportConfig() {
+  const payload = {
+    enabled:    document.getElementById('er-enabled').checked,
+    recipients: document.getElementById('er-recipients').value,
+    send_day:   parseInt(document.getElementById('er-day').value),
+    send_hour:  parseInt(document.getElementById('er-hour').value),
+  };
+  try {
+    const res  = await fetch('/api/config/exec-reports-config', {
+      method: 'PUT', headers: authHeaders(), body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    showToast(data.ok ? 'Configuración guardada' : (data.error || 'Error al guardar'), data.ok ? 'success' : 'error');
   } catch(e) {
     showToast('Error de conexión', 'error');
   }

@@ -17,7 +17,7 @@ HTTP y muestra una advertencia al arrancar.
 |---|---|
 | `index.html` | Portal con tarjetas por módulo y semáforo de salud (lee `soc_status.json`) |
 | `sentinel_dashboard_simple.html` | Incidentes de SentinelOne (lee `sentinel_dashboard_data.json`) |
-| `nmap_dashboard_output.html` | Activos, servicios y hallazgos (generado desde `nmap_dashboard.html`) |
+| `nmap_dashboard_output.html` | Vulnerabilidades reales (CVE, KEV, confirmadas por NSE), activos, servicios y hallazgos de exposición (generado desde `nmap_dashboard.html`) |
 | `fortinet_dashboard_output.html` y `fortinet_dashboard_<equipo>.html` | Configuración y políticas por FortiGate |
 | `fortinet_threats_dashboard.html` | Amenazas: tráfico, eventos, webfilter, IPS, VPN y antivirus (`?device=<equipo>`; 24 h y 7 d) |
 | `snyk_dashboard.html` | Vulnerabilidades por repositorio y aplicación, con descarte. Solo muestra los repos en scope (`ambiente=produccion`, leídos de `repos_snyk_batch.txt`); los hallazgos de repos fuera de scope siguen en BD pero no se muestran. El resumen por proyecto y el detalle por aplicación listan siempre todos los repos en scope con un estado (`con hallazgos`, `limpio` con ceros, `pending` si nunca se ha escaneado, `error`, `sin proyecto soportado`) calculado del último registro en `snyk_scan_runs` |
@@ -89,6 +89,34 @@ sesión (`401` si falta).
 | GET | `/api/config/alert-log` | Últimas 100 alertas |
 | POST | `/api/config/test-smtp` | Envía un correo de prueba a `SMTP_USER` |
 | POST | `/api/dismissals` | Descarta o reactiva un hallazgo de Snyk |
+| GET | `/api/config/exec-reports` | Lista los reportes ejecutivos (sin el HTML) con su último envío, y la config de envío automático |
+| GET | `/api/config/exec-reports/<id>/html` | HTML del reporte listo (`?download=1` lo descarga). Responde `text/html` con CSP sin scripts |
+| POST | `/api/config/exec-reports/generate` | `{"period": "AAAA-MM"}`; lanza la generación en un hilo y devuelve `id` y `started` (`false` si ya se estaba generando) |
+| POST | `/api/config/exec-reports/<id>/send` | `{"recipients": "a@x.com, b@x.com"}`; envía el reporte por SMTP |
+| PUT | `/api/config/exec-reports-config` | `{"enabled", "recipients", "send_day", "send_hour"}` del envío automático |
+| DELETE | `/api/config/exec-reports/<id>` | Elimina un reporte y su historial de envíos |
+
+### Reportes ejecutivos
+
+Pestaña **Reportes Ejecutivos** del panel. `app/reports/executive.py` agrega el
+mes (hora de México) de FortiGate, SentinelOne, Snyk (repos en scope, sin
+descartados), Nmap y cPanel, prioriza las amenazas en lenguaje de negocio y arma
+un HTML compatible con clientes de correo (gráficas hechas con tablas, sin JS ni
+imágenes). La agregación de `fortinet_threats` recorre millones de filas, por eso
+la generación corre en segundo plano (≈30 s–4 min) y el resultado se guarda en
+`executive_reports`. Si se genera el mes en curso, el reporte sale marcado como
+parcial. La comparación con el mes anterior usa el reporte guardado de ese mes;
+si no existe se recalcula, pero Fortinet solo se compara si la retención (60
+días) aún cubre ese mes completo.
+
+El reporte incluye además la sección **Comparación con meses anteriores**:
+columnas por mes (hasta 12, incluido el del reporte) de amenazas bloqueadas,
+incidentes de SentinelOne y vulnerabilidades críticas/altas abiertas, con el
+mes contra el promedio de los anteriores. Cada mes sale del reporte guardado de
+ese mes (generado ya cerrado); SentinelOne se recalcula en vivo si su retención
+aún cubre el mes. Por la retención corta de Fortinet, el histórico de bloqueos
+se va llenando conforme se generan reportes mensuales; los meses iniciales sin
+datos se omiten y una serie con menos de 2 meses no se grafica.
 
 ### Crear o editar una regla
 

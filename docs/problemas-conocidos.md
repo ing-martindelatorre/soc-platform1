@@ -96,6 +96,13 @@ Fortinet devuelve `ok: False` si **falla cualquier equipo**, y Nmap si falla
   panel no lo exponen.
 - El cooldown de alertas de fallo de pipeline vive en memoria y se pierde al
   reiniciar.
+- De `nmap_vulnerabilities` sólo alertan las KEV (`nmap` / `kev`); los CVEs
+  `confirmed` que no están en KEV no tienen consulta de alerta.
+- Nmap: los CVEs "por versión" (vulners) que **no** están en KEV no se
+  verifican contra NVD (sin API key de NVD serían miles de consultas); pueden
+  ser falsos positivos por backports o por la comparación de versiones de
+  vulners. `nmap_findings` sigue insertando una fila por hallazgo en cada
+  escaneo (sin deduplicar).
 
 ### 8. Esquema de Snyk sin migración
 

@@ -75,6 +75,15 @@ Desde el panel `config.html`, pestaña de intervalos, o con la API
 (`PUT /api/config/schedules/<job_id>`). Se aplica en unos 30 s sin reiniciar.
 También se puede editar `job_config` directamente en SQL.
 
+### Reporte ejecutivo mensual
+
+Panel `config.html` → pestaña **Reportes Ejecutivos**: generar un mes, verlo,
+imprimirlo/guardarlo como PDF, descargarlo y enviarlo por correo. Ahí mismo se
+activa el envío automático (destinatarios, día y hora); lo ejecuta el
+scheduler, así que no se envía nada si `soc-platform1.service` está detenido.
+Requiere la migración `027_executive_reports.sql` y SMTP configurado. Mensajes en
+`journalctl` con el prefijo `[exec-report]`.
+
 ### Ejecutar un pipeline a mano
 
 ```bash

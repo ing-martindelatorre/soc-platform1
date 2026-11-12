@@ -97,18 +97,50 @@ se omiten con una advertencia.
 | `quick` | `-Pn -T4 -sT -sV --top-ports 100` | Ligero, sin root |
 | `full_tcp` | `-Pn -T4 -sT -sV -p-` | Todos los puertos TCP |
 | `perimeter` | `-Pn -T4 -sS -sV -O --top-ports 1000` | **Requiere root** (`-sS`, `-O`) |
-| `vuln` | `-Pn -T4 -sT -sV --script vuln --top-ports 1000` | Pesado |
+| `vuln` | `-Pn -T4 -sT -sV --script vuln --top-ports 1000` | Pesado; incluye scripts intrusivos |
+| `cve` | `-Pn -T4 -sT -sV --script "vulners or (vuln and safe)" --script-timeout 5m --top-ports 1000` | CVEs reales; lo usa `nmap_cve_job`. `vulners` consulta la API de vulners.com |
 
 El scheduler ejecuta `nmap_quick_job` con `profile_override="quick"` y
-`nmap_deep_job` con `profile_override="full_tcp"`, es decir, **ignora el perfil
+`nmap_deep_job` con `profile_override="full_tcp"` y `nmap_cve_job` con
+`profile_override="cve"`, es decir, **ignora el perfil
 de la tercera columna** y aplica el mismo a todos los targets habilitados.
 
 **Enriquecimiento.** `service_mapper.py` clasifica servicios, calcula el
 riesgo del puerto y marca versiones antiguas; `enrich_nmap_findings.py`
-convierte todo en hallazgos con severidad, recomendación y categoría.
+convierte todo en hallazgos con severidad, recomendación y categoría. Los
+resultados NSE negativos ("NOT VULNERABLE", "Couldn't find…", "Script
+execution failed") y la salida de `vulners` ya no se guardan como hallazgos.
+
+**Vulnerabilidades reales (CVE).** Aparte de los hallazgos de exposición,
+`cve_extract.py` lee la salida estructurada (`<table>`) de los scripts NSE y
+genera filas para `nmap_vulnerabilities` con un nivel de certeza:
+
+- `confirmed` / `likely`: scripts de la librería vulns (`http-slowloris-check`,
+  `ssl-dh-params`, `smb-vuln-ms17-010`…) con `State: VULNERABLE` / `LIKELY
+  VULNERABLE`. El script probó el fallo.
+- `version`: script `vulners`, coincidencia producto+versión del banner. **No
+  probado**: falsos positivos por parches backporteados (RHEL/CentOS/cPanel) y
+  por comparaciones de versión erróneas de vulners (Exim `4.100` tratado como
+  anterior a `4.92`). Si un script específico del mismo CVE
+  (`smtp-vuln-cve2010-4344`…) dijo NOT VULNERABLE, el CVE se descarta.
+
+Después se cruza con el catálogo **CISA KEV** (`kev.py`, CVEs explotados
+activamente; se descarga una vez al día a `data/cisa_kev.json`). Para CVEs
+"por versión" sólo cuenta como KEV si el producto de CISA coincide con el
+servicio (vulners mezcla CVEs de avisos de distribución: Shellshock o Dirty
+COW listados para BIND). Los KEV "por versión" se verifican además contra los
+rangos de versión de **NVD** (`nvd_verify.py`, caché de 30 días en
+`data/nvd_cve_cache.json`, máx. 60 consultas por corrida); si NVD confirma
+que la versión no está afectada, el CVE se descarta.
 
 **Carga.** `upsert_asset` (por IP) y `upsert_service` (por activo, puerto y
 protocolo); los hallazgos se insertan con vínculo al activo y al servicio.
+Las vulnerabilidades se hacen upsert por `(activo, puerto, protocolo,
+vuln_id)`. Sólo en perfiles con `--script` (`cve`, `vuln`) se marcan como
+`resolved` las que ese escaneo ya no reporta; los CVEs "por versión" de un
+puerto abierto donde `vulners` no produjo salida (API caída) no se resuelven.
+
+Escaneo manual de CVEs: `python -m app.cli nmap --profile cve`.
 
 ## Fortinet (`app/modules/fortinet`)
 
@@ -194,6 +226,28 @@ del tráfico saliente.
 
 Las IPs privadas no se consultan. Para confiar en una organización nueva,
 agrega su ASN o un patrón a `trusted_orgs.py`.
+
+## Reportes ejecutivos (`app/reports/executive.py`)
+
+No es un pipeline ETL: lee lo que ya recolectaron los módulos y genera un
+reporte mensual para gerencia. Lo usan el panel (`/api/config/exec-reports/*`) y
+el scheduler (`exec_report_job`).
+
+- `collect_report_data(period)`: métricas del mes. Cada fuente va en su propia
+  sección; si una falla, el reporte sale sin ella y lo indica en el pie.
+- `build_highlights(data)`: convierte las métricas en las amenazas más
+  importantes (nivel, cifra, qué pasó y qué se recomienda). El nivel de riesgo
+  del mes sale de ahí: **alto** si hay algo crítico (p.ej. ransomware pendiente),
+  **medio** si hay algo importante, **bajo** en otro caso.
+- `_history(...)` / `_history_section(data)`: serie mensual de KPIs
+  (`HISTORY_MONTHS = 12`, `HISTORY_KEYS`) guardada en `data["history"]` y sus
+  gráficas de comparación. Fuente por mes: reporte guardado de ese mes →
+  SentinelOne en vivo. No regeneres reportes de meses viejos sin necesidad: el
+  `generated_at` nuevo invalida su foto de vulnerabilidades abiertas
+  (`SNAPSHOT_MAX_DAYS`) y Fortinet ya no tendrá el detalle para recalcularlos.
+- Las traducciones a lenguaje no técnico (`FORTI_CATEGORIES`,
+  `SENTINEL_CLASSES`, `VIRUS_FAMILIES`, `NMAP_SERVICES`, `PIRACY_PATTERN`) están
+  al inicio del archivo; amplíalas ahí.
 
 ## Cómo añadir un módulo nuevo
 

@@ -111,7 +111,107 @@ def insert_finding(conn, asset_id: int, service_id: int | None, finding: dict[st
         )
 
 
-def load_to_db(enriched_data: dict[str, Any]) -> None:
+def upsert_vulnerability(conn, asset_id: int, service_id: int | None, vuln: dict[str, Any]) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO nmap_vulnerabilities (
+                asset_id, service_id, port, protocol, vuln_id, is_cve, cvss,
+                severity, detection, has_exploit, in_kev, kev_ransomware, nvd_affected, title,
+                product, version, cpe, script_name, reference_url, status,
+                first_seen, last_seen
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, 'open', NOW(), NOW())
+            ON CONFLICT (asset_id, port, protocol, vuln_id)
+            DO UPDATE SET
+                service_id    = EXCLUDED.service_id,
+                is_cve        = EXCLUDED.is_cve,
+                cvss          = EXCLUDED.cvss,
+                severity      = EXCLUDED.severity,
+                detection     = EXCLUDED.detection,
+                has_exploit   = EXCLUDED.has_exploit,
+                in_kev        = EXCLUDED.in_kev,
+                kev_ransomware = EXCLUDED.kev_ransomware,
+                nvd_affected  = EXCLUDED.nvd_affected,
+                title         = EXCLUDED.title,
+                product       = EXCLUDED.product,
+                version       = EXCLUDED.version,
+                cpe           = EXCLUDED.cpe,
+                script_name   = EXCLUDED.script_name,
+                reference_url = EXCLUDED.reference_url,
+                status        = 'open',
+                resolved_at   = NULL,
+                last_seen     = NOW();
+            """,
+            (
+                asset_id,
+                service_id,
+                vuln.get("port", 0),
+                vuln.get("protocol", ""),
+                vuln["vuln_id"],
+                vuln.get("is_cve", True),
+                vuln.get("cvss"),
+                vuln["severity"],
+                vuln["detection"],
+                vuln.get("has_exploit", False),
+                vuln.get("in_kev", False),
+                vuln.get("kev_ransomware", False),
+                vuln.get("nvd_affected"),
+                vuln.get("title"),
+                vuln.get("product"),
+                vuln.get("version"),
+                vuln.get("cpe"),
+                vuln.get("script_name"),
+                vuln.get("reference_url"),
+            ),
+        )
+
+
+def resolve_missing_vulnerabilities(conn, asset_id: int, asset: dict[str, Any]) -> int:
+    """
+    Marca como resueltas las vulnerabilidades abiertas del activo que este
+    escaneo (con scripts) ya no reportó. NOW() es constante dentro de la
+    transacción, así que "no vista en esta corrida" = last_seen < NOW().
+
+    Salvaguarda: si en un puerto que sigue abierto el script vulners no
+    produjo salida (API de vulners.com caída, timeout), sus CVEs "por versión"
+    NO se resuelven.
+    """
+    services = asset.get("services", [])
+    if asset.get("status") != "up" or not services:
+        return 0
+
+    open_ports = [s["port"] for s in services]
+    vulners_ports = [
+        s["port"] for s in services
+        if any(sc.get("id") == "vulners" and sc.get("output") for sc in s.get("scripts", []))
+    ]
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE nmap_vulnerabilities
+               SET status = 'resolved', resolved_at = NOW()
+             WHERE asset_id = %s
+               AND status = 'open'
+               AND last_seen < NOW()
+               AND (
+                    detection <> 'version'
+                    OR port <> ALL(%s)
+                    OR port = ANY(%s)
+               )
+            """,
+            (asset_id, open_ports, vulners_ports),
+        )
+        return cur.rowcount
+
+
+def load_to_db(enriched_data: dict[str, Any], vuln_scan: bool = False) -> None:
+    """
+    vuln_scan: True si el perfil ejecutó scripts NSE de vulnerabilidades.
+               Sólo entonces se cierran las vulnerabilidades que ya no aparecen
+               (un escaneo sin scripts no puede afirmar que algo se corrigió).
+    """
     conn = get_connection()
 
     try:
@@ -129,6 +229,16 @@ def load_to_db(enriched_data: dict[str, Any]) -> None:
 
                 service_id = service_map.get((finding["port"], finding["protocol"]))
                 insert_finding(conn, asset_id, service_id, finding)
+
+            for vuln in enriched_data.get("vulnerabilities", []):
+                if vuln["asset_ip"] != asset["ip"]:
+                    continue
+
+                service_id = service_map.get((vuln["port"], vuln["protocol"]))
+                upsert_vulnerability(conn, asset_id, service_id, vuln)
+
+            if vuln_scan:
+                resolve_missing_vulnerabilities(conn, asset_id, asset)
 
         conn.commit()
         print("[OK] Datos Nmap cargados a PostgreSQL")

@@ -20,6 +20,7 @@ from app.modules.nmap.pipeline_nmap import (
 from app.modules.nmap.parse_nmap_xml import parse_xml
 from app.modules.nmap.enrich_nmap_findings import enrich
 from app.modules.nmap.load import load_to_db
+from app.modules.nmap.profiles import get_profile_args
 
 logger = logging.getLogger("soc-platform")
 
@@ -86,7 +87,8 @@ def run_nmap_pipeline(
             enriched = enrich(parsed)
 
             # 4. Cargar a PostgreSQL
-            load_to_db(enriched)
+            vuln_scan = "--script" in get_profile_args(profile)
+            load_to_db(enriched, vuln_scan=vuln_scan)
 
             # 5. Guardar JSON enriquecido en disco (para auditoría / debug)
             ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -103,13 +105,15 @@ def run_nmap_pipeline(
                 "status":        "success",
                 "assets_found":  enriched["summary"]["total_assets"],
                 "findings_found": enriched["summary"]["total_findings"],
+                "vulns_found":   enriched["summary"]["total_vulnerabilities"],
                 "xml_path":      str(xml_path),
                 "enriched_path": str(enriched_path),
             })
 
             logger.info(
                 f"Nmap OK: {name} | assets={enriched['summary']['total_assets']} "
-                f"findings={enriched['summary']['total_findings']}"
+                f"findings={enriched['summary']['total_findings']} "
+                f"vulns={enriched['summary']['total_vulnerabilities']}"
             )
 
         except Exception as exc:

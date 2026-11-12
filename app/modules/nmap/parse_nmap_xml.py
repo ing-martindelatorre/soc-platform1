@@ -13,21 +13,39 @@ def get_text_attr(element: ET.Element | None, attr: str, default: str = "") -> s
     return element.attrib.get(attr, default)
 
 
+def parse_table(table_el: ET.Element) -> dict[str, Any]:
+    """
+    Convierte recursivamente un <table> de NSE a dict. Los scripts como
+    vulners o los de la librería vulns (http-slowloris-check, ssl-dh-params…)
+    sólo exponen CVSS, estado y CVE de forma estructurada dentro de <table>.
+    """
+    return {
+        "key": table_el.attrib.get("key", ""),
+        "elements": [
+            {"key": elem.attrib.get("key", ""), "text": elem.text or ""}
+            for elem in table_el.findall("elem")
+        ],
+        "tables": [parse_table(t) for t in table_el.findall("table")],
+    }
+
+
+def parse_script(script: ET.Element) -> dict[str, Any]:
+    return {
+        "id": script.attrib.get("id", ""),
+        "output": script.attrib.get("output", ""),
+        "elements": [
+            {
+                "key": elem.attrib.get("key", ""),
+                "text": elem.text or ""
+            }
+            for elem in script.findall("elem")
+        ],
+        "tables": [parse_table(t) for t in script.findall("table")],
+    }
+
+
 def parse_scripts(port_el: ET.Element) -> list[dict[str, Any]]:
-    scripts = []
-    for script in port_el.findall("script"):
-        scripts.append({
-            "id": script.attrib.get("id", ""),
-            "output": script.attrib.get("output", ""),
-            "elements": [
-                {
-                    "key": elem.attrib.get("key", ""),
-                    "text": elem.text or ""
-                }
-                for elem in script.findall("elem")
-            ]
-        })
-    return scripts
+    return [parse_script(script) for script in port_el.findall("script")]
 
 
 def parse_hostscripts(host_el: ET.Element) -> list[dict[str, Any]]:
@@ -37,17 +55,7 @@ def parse_hostscripts(host_el: ET.Element) -> list[dict[str, Any]]:
         return scripts
 
     for script in hostscript.findall("script"):
-        scripts.append({
-            "id": script.attrib.get("id", ""),
-            "output": script.attrib.get("output", ""),
-            "elements": [
-                {
-                    "key": elem.attrib.get("key", ""),
-                    "text": elem.text or ""
-                }
-                for elem in script.findall("elem")
-            ]
-        })
+        scripts.append(parse_script(script))
     return scripts
 
 

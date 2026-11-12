@@ -45,6 +45,7 @@ diccionario `QUERIES`. Si no existe, la regla se omite con un `warning`
 | `fortinet` | `antivirus` | Detecciones de antivirus (`condition_value` se ignora) | 1 hora |
 | `snyk` | `severity` | Hallazgos con esa severidad | 24 horas |
 | `nmap` | `severity` | Hallazgos con esa severidad | 6 horas |
+| `nmap` | `kev` | Vulnerabilidades abiertas de `nmap_vulnerabilities` en el catálogo CISA KEV (`all`) o sólo las usadas en ransomware (`ransomware`); excluye las que NVD descartó | 24 horas (`last_seen`) |
 
 Todas las consultas devuelven las mismas columnas normalizadas
 (`source_label`, `detail`, `severity`, `event_count`, `first_seen`,
@@ -66,7 +67,9 @@ Para cada regla activa:
 4. **Deduplicación por entidad.** Cada fila genera una clave
    `r{rule_id}:{source_label}:{detail}`. Se descartan las claves que ya
    aparecen en `alert_log` con `status = 'sent'` dentro de la ventana de
-   `cooldown_minutes`.
+   `cooldown_minutes`, o de `ENTITY_DEDUP_MINUTES` si la consulta define una
+   mayor (`nmap.kev`: 30 días, porque una KEV sigue abierta hasta que se
+   parchea; así se avisa una vez por `IP:puerto` + CVE y se recuerda cada mes).
 5. **Un solo correo.** Si quedan entidades nuevas, se envía **un** correo con
    todas: resumen agregado, tabla de entidades y acciones recomendadas
    (`ACTION_ITEMS` por módulo).
@@ -101,6 +104,13 @@ La migración 019 crea la regla "Antivirus Fortinet — Malware detectado"
 (`fortinet` / `antivirus`, cooldown 60 min, asunto
 `[SOC CRÍTICO] Malware detectado por Fortinet`). Cambia sus destinatarios
 desde el panel tras aplicar la migración.
+
+La migración 029 crea "Nmap — Vulnerabilidad explotada activamente (CISA
+KEV)" (`nmap` / `kev` = `all`, cooldown 60 min, asunto `[SOC CRÍTICO]
+Vulnerabilidad KEV explotada activamente`). Copia los destinatarios de la
+regla Nmap existente (o de la primera regla activa); si no hay ninguna, no
+inserta nada. Las acciones recomendadas del correo están en
+`ACTION_ITEMS["nmap_kev"]`.
 
 ## Severidades y estilos
 

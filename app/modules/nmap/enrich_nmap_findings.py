@@ -6,6 +6,9 @@ from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
+from app.modules.nmap.cve_extract import extract_vulnerabilities, is_negative_nse_output, refuted_cves
+from app.modules.nmap.kev import annotate_kev
+from app.modules.nmap.nvd_verify import verify_kev_versions
 from app.modules.nmap.service_mapper import (
     build_service_tags,
     classify_service,
@@ -54,9 +57,35 @@ def build_finding(
     }
 
 
+def _vuln_rows(
+        scripts: list[dict[str, Any]],
+        asset_ip: str,
+        port: int,
+        protocol: str,
+        product: str,
+        version: str,
+) -> list[dict[str, Any]]:
+    rows = []
+    refuted = refuted_cves(scripts)
+    for script in scripts:
+        for v in extract_vulnerabilities(script):
+            if v["detection"] == "version" and v["vuln_id"] in refuted:
+                continue
+            rows.append({
+                **v,
+                "asset_ip": asset_ip,
+                "port": port,
+                "protocol": protocol,
+                "product": product,
+                "version": version,
+            })
+    return rows
+
+
 def enrich(parsed_data: dict[str, Any]) -> dict[str, Any]:
     assets = []
     findings = []
+    vulnerabilities = []
 
     for host in parsed_data.get("hosts", []):
         addresses = host.get("addresses", {})
@@ -167,11 +196,15 @@ def enrich(parsed_data: dict[str, Any]) -> dict[str, Any]:
                     },
                 ))
 
+            vulnerabilities.extend(_vuln_rows(scripts, ip, port, protocol, product, version))
+
             for script in scripts:
                 script_id = script.get("id", "")
                 output = script.get("output", "")
 
-                if not output:
+                # Resultados negativos ("NOT VULNERABLE", "Couldn't find…", errores)
+                # y la salida de vulners (va a nmap_vulnerabilities) no son hallazgos.
+                if is_negative_nse_output(script):
                     continue
 
                 sev = "medium" if "vuln" in script_id.lower() else "info"
@@ -198,16 +231,26 @@ def enrich(parsed_data: dict[str, Any]) -> dict[str, Any]:
                     script_name=script_id,
                 ))
 
+        # Scripts a nivel host (ej. smb-vuln-ms17-010) no tienen puerto: port=0
+        vulnerabilities.extend(_vuln_rows(host.get("hostscripts", []), ip, 0, "", "", ""))
+
         assets.append(asset)
+
+    annotate_kev(vulnerabilities)
+    verify_kev_versions(vulnerabilities)
+    # NVD confirmó que la versión no está afectada: falso positivo de vulners
+    vulnerabilities = [v for v in vulnerabilities if v.get("nvd_affected") is not False]
 
     return {
         "generated_at": utc_now(),
         "summary": {
             "total_assets": len(assets),
             "total_findings": len(findings),
+            "total_vulnerabilities": len(vulnerabilities),
         },
         "assets": assets,
         "findings": findings,
+        "vulnerabilities": vulnerabilities,
     }
 
 

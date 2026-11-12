@@ -29,13 +29,15 @@ Exceptions: Nmap splits the pipeline across `run_nmap_scan.py`, `parse_nmap_xml.
 **Configurable schedules** — collection frequencies are NOT hardcoded. `app/pipeline/job_config.py::JOB_DEFINITIONS` holds the fixed part (module, kwargs, misfire grace, start offset, defaults); the interval/cron and `enabled` flag live in the `job_config` table. `config_watcher_job` polls that table every 30 s and reschedules/pauses/resumes jobs live. Default schedules:
 - `sentinel_job` every 5 min
 - `fortinet_config_job` every 15 min; `fortinet_logs_job` every 15 min (+7 min offset); `fortinet_threats_job` every 5 min (the FortiGate memory-log buffer rotates fast)
-- `nmap_quick_job` every 360 min (`profile_override="quick"`); `nmap_deep_job` cron `0 2 * * 0` (`full_tcp`)
+- `nmap_quick_job` every 360 min (`profile_override="quick"`); `nmap_deep_job` cron `0 2 * * 0` (`full_tcp`); `nmap_cve_job` cron `0 3 * * 3` (`cve`: vulners + safe vuln scripts → `nmap_vulnerabilities`, cross-checked with CISA KEV and NVD)
 - `snyk_job` cron `0 1 * * *`
 - `cpanel_stats_job` 15 min, `cpanel_security_job` 15 min (+5 offset), `cpanel_accounts_job` 60 min, `cpanel_logs_job` 30 min
 
-Fixed jobs: `alert_engine_job` (every 5 min), `cleanup_job` (daily 03:00), `config_watcher_job` (30 s). `job_runs` stores the **module name** (not the APScheduler job id) with status `running|success|failed`; messages truncated to 5000 chars. `execute_job` records `failed` when a pipeline raises **or returns `ok: False`** (Fortinet/Nmap return `ok: False` if any single device/target fails).
+Fixed jobs: `alert_engine_job` (every 5 min), `cleanup_job` (daily 03:00), `config_watcher_job` (30 s), `exec_report_job` (hourly; sends the monthly executive report on the day/hour set in `executive_report_config`). `job_runs` stores the **module name** (not the APScheduler job id) with status `running|success|failed`; messages truncated to 5000 chars. `execute_job` records `failed` when a pipeline raises **or returns `ok: False`** (Fortinet/Nmap return `ok: False` if any single device/target fails).
 
-**Alerts** (`app/alerts/engine.py`) — rules in `alert_rules`, per-entity dedup via `alert_log.dedup_key` within `cooldown_minutes`, one email per rule evaluation, optional Slack webhook. Queries exist for sentinel, fortinet (`classification`, `source`, `antivirus`), snyk and nmap only — not cpanel. The engine runs only in the scheduler (`alert_engine_job`); the dashboard has no alert thread, so no alerts are sent if the scheduler is down.
+**Alerts** (`app/alerts/engine.py`) — rules in `alert_rules`, per-entity dedup via `alert_log.dedup_key` within `cooldown_minutes`, one email per rule evaluation, optional Slack webhook. Queries exist for sentinel, fortinet (`classification`, `source`, `antivirus`), snyk and nmap (`severity` on findings, `kev` on `nmap_vulnerabilities` with a 30-day entity dedup via `ENTITY_DEDUP_MINUTES`) only — not cpanel. The engine runs only in the scheduler (`alert_engine_job`); the dashboard has no alert thread, so no alerts are sent if the scheduler is down.
+
+**Executive reports** (`app/reports/executive.py`) — monthly manager-facing threat report (config panel tab "Reportes Ejecutivos"). Aggregates the month from all sources, builds email-safe HTML (table-based bar charts) and stores it in `executive_reports`; generation runs in a background thread because the `fortinet_threats` aggregation takes up to minutes.
 
 **Database** — PostgreSQL 16 (Docker). The app runs in a local venv; only Postgres and pgAdmin are containerized.
 
@@ -65,6 +67,7 @@ pgAdmin is published on `http://localhost:8081` by `docker-compose.yml` (`start_
 python -m app.cli sentinel
 python -m app.cli snyk
 python -m app.cli nmap
+python -m app.cli nmap --profile cve             # CVE scan (vulners + safe vuln scripts)
 python -m app.cli fortinet --mode config|logs   # CLI has no `threats` choice; use run_module('fortinet', mode='threats')
 python -m app.cli cpanel --mode stats|security|accounts|logs
 ```
@@ -114,7 +117,7 @@ Create a `.env` in the project root (never commit it). There is no `.env.example
 
 ## Database Migrations
 
-SQL migrations are in `sql/`, numbered `001_` through `025_`. There is no migration runner: Docker applies them only when the data volume is first created (`./sql` is mounted in `docker-entrypoint-initdb.d`); on an existing database apply new ones manually, in order, via psql or pgAdmin. Make new migrations idempotent and use the next free number. Note: `snyk_scan_runs` and `snyk_account_state` are created at runtime by `ensure_snyk_tables()` in `app/modules/snyk/load.py`, not by a migration.
+SQL migrations are in `sql/`, numbered `001_` through `029_`. There is no migration runner: Docker applies them only when the data volume is first created (`./sql` is mounted in `docker-entrypoint-initdb.d`); on an existing database apply new ones manually, in order, via psql or pgAdmin. Make new migrations idempotent and use the next free number. Note: `snyk_scan_runs` and `snyk_account_state` are created at runtime by `ensure_snyk_tables()` in `app/modules/snyk/load.py`, not by a migration.
 
 ## Gotchas
 
