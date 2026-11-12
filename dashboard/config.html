@@ -968,7 +968,7 @@ async function saveRule() {
   const thresholdCount = parseInt(document.getElementById('r-threshold').value) || 1;
   const subject        = document.getElementById('r-subject').value.trim();
   const recipients     = document.getElementById('r-recipients').value
-    .split('\n').map(e => e.trim()).filter(Boolean);
+    .split(/[\n,;]+/).map(e => e.trim()).filter(Boolean);
 
   if (!name || !subject || !recipients.length) {
     showToast('Completa todos los campos requeridos', 'error');

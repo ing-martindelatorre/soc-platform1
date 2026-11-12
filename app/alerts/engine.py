@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import smtplib
 import ssl
 from datetime import datetime, timezone, timedelta
@@ -38,6 +39,12 @@ def send_email(recipients: list[str], subject: str, html_body: str) -> bool:
 
     if not smtp_host or not smtp_user:
         logger.warning("[alerts] SMTP no configurado — revisa SMTP_HOST y SMTP_USER en .env")
+        return False
+
+    # Tolera destinatarios guardados como "a@x.com, b@y.com" en un solo elemento
+    recipients = [e.strip() for r in recipients for e in re.split(r"[,;\s]+", r or "") if e.strip()]
+    if not recipients:
+        logger.warning("[alerts] Sin destinatarios válidos")
         return False
 
     try:
