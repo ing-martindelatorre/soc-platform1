@@ -22,6 +22,7 @@ def build_parser():
     parser.add_argument("--endpoint", default="/api/v2/log/memory/traffic/forward")
     parser.add_argument("--date-from")
     parser.add_argument("--date-to")
+    parser.add_argument("--profile", help="nmap: perfil para todos los targets (quick, full_tcp, cve, vuln…)")
 
     return parser
 
@@ -41,6 +42,8 @@ def main():
         "date_from": args.date_from,
         "date_to": args.date_to,
     }
+    if args.profile:
+        kwargs["profile_override"] = args.profile
 
     logger.info(f"Running module: {args.module}")
     result = run_module(args.module, **kwargs)

@@ -279,6 +279,97 @@ def refresh_sentinel():
 # =============================================================================
 # NMAP
 # =============================================================================
+def _fetch_nmap_vulns(cur) -> dict:
+    """
+    Vulnerabilidades reales abiertas (tabla nmap_vulnerabilities, migración 028):
+    CVEs por versión agrupados por servicio, y las confirmadas por NSE una a una.
+    Si la migración no está aplicada devuelve available=False.
+    """
+    cur.execute("SELECT to_regclass('public.nmap_vulnerabilities') AS t")
+    if not cur.fetchone()["t"]:
+        return {"available": False}
+
+    cur.execute("""
+        SELECT a.ip, COALESCE(a.hostname,'') AS hostname, v.port, v.protocol,
+               COALESCE(v.product,'') AS product, COALESCE(v.version,'') AS version,
+               COUNT(*)                                            AS total,
+               COUNT(*) FILTER (WHERE v.severity = 'critical')     AS critical,
+               COUNT(*) FILTER (WHERE v.severity = 'high')         AS high,
+               COUNT(*) FILTER (WHERE v.in_kev)                    AS kev,
+               COUNT(*) FILTER (WHERE v.kev_ransomware)            AS ransomware,
+               MAX(v.cvss)                                         AS max_cvss,
+               MAX(v.last_seen)                                    AS last_seen,
+               (ARRAY_AGG(v.vuln_id || '|' || COALESCE(v.cvss::text,'') || '|' || v.in_kev::text
+                          ORDER BY v.in_kev DESC, v.cvss DESC NULLS LAST, v.vuln_id DESC))[1:10] AS top
+        FROM nmap_vulnerabilities v JOIN nmap_assets a ON a.id = v.asset_id
+        WHERE v.status = 'open' AND v.detection = 'version'
+        GROUP BY a.ip, a.hostname, v.port, v.protocol, v.product, v.version
+        ORDER BY COUNT(*) FILTER (WHERE v.in_kev) DESC, MAX(v.cvss) DESC NULLS LAST, COUNT(*) DESC
+    """)
+    by_service = []
+    for r in cur.fetchall():
+        top = []
+        for item in r["top"] or []:
+            vid, cvss, kev = item.split("|")
+            top.append({"id": vid, "cvss": float(cvss) if cvss else None, "kev": kev == "true"})
+        by_service.append({
+            "ip": r["ip"], "hostname": r["hostname"], "port": r["port"], "protocol": r["protocol"],
+            "product": r["product"], "version": r["version"], "total": r["total"],
+            "critical": r["critical"], "high": r["high"], "kev": r["kev"], "ransomware": r["ransomware"],
+            "max_cvss": float(r["max_cvss"]) if r["max_cvss"] is not None else None,
+            "last_seen": str(r["last_seen"])[:16], "top": top,
+        })
+
+    cur.execute("""
+        SELECT a.ip, COALESCE(a.hostname,'') AS hostname, v.port, v.protocol, v.vuln_id, v.is_cve,
+               v.cvss, v.severity, v.detection, v.in_kev, COALESCE(v.title,'') AS title,
+               COALESCE(v.product,'') AS product, COALESCE(v.version,'') AS version,
+               COALESCE(v.script_name,'') AS script_name, COALESCE(v.reference_url,'') AS reference_url,
+               v.first_seen, v.last_seen
+        FROM nmap_vulnerabilities v JOIN nmap_assets a ON a.id = v.asset_id
+        WHERE v.status = 'open' AND v.detection <> 'version'
+        ORDER BY (v.detection = 'confirmed') DESC, v.cvss DESC NULLS LAST, a.ip, v.port
+    """)
+    confirmed = [
+        {**{k: r[k] for k in ("ip", "hostname", "port", "protocol", "vuln_id", "is_cve", "severity",
+                              "detection", "in_kev", "title", "product", "version", "script_name", "reference_url")},
+         "cvss": float(r["cvss"]) if r["cvss"] is not None else None,
+         "first_seen": str(r["first_seen"])[:10], "last_seen": str(r["last_seen"])[:16]}
+        for r in cur.fetchall()
+    ]
+
+    cur.execute("""
+        SELECT COUNT(DISTINCT vuln_id) FILTER (WHERE is_cve)                          AS cves,
+               COUNT(*) FILTER (WHERE severity = 'critical')                           AS critical,
+               COUNT(DISTINCT vuln_id) FILTER (WHERE in_kev)                           AS kev,
+               COUNT(DISTINCT asset_id) FILTER (WHERE in_kev)                          AS kev_hosts,
+               COUNT(*) FILTER (WHERE detection <> 'version')                          AS confirmed,
+               COUNT(DISTINCT asset_id)                                                AS hosts,
+               MAX(last_seen)                                                          AS last_scan
+        FROM nmap_vulnerabilities WHERE status = 'open'
+    """)
+    k = cur.fetchone()
+    cur.execute("SELECT COUNT(*) AS n FROM nmap_vulnerabilities WHERE status = 'resolved'")
+    resolved = cur.fetchone()["n"]
+
+    return {
+        "available": True,
+        "kpis": {
+            "cves": k["cves"] or 0, "critical": k["critical"] or 0, "kev": k["kev"] or 0, "kev_hosts": k["kev_hosts"] or 0,
+            "confirmed": k["confirmed"] or 0, "hosts": k["hosts"] or 0, "resolved": resolved,
+            "last_scan": str(k["last_scan"])[:16] if k["last_scan"] else None,
+        },
+        "by_service": by_service,
+        "confirmed": confirmed,
+    }
+
+
+def _embed_json(data: dict) -> str:
+    """JSON para incrustar en <script>: escapa '</' para que datos de los
+    escaneos (títulos, banners) no puedan cerrar la etiqueta."""
+    return json.dumps(data, ensure_ascii=False, default=str).replace("</", "<\\/")
+
+
 def build_nmap_data() -> dict:
     with db_connect() as conn:
         with conn.cursor() as cur:
@@ -306,6 +397,8 @@ def build_nmap_data() -> dict:
                 ORDER BY f.created_at DESC
             """)
             findings = cur.fetchall()
+
+            vulns = _fetch_nmap_vulns(cur)
 
     sev_counter  = Counter(f["severity"] or "unknown" for f in findings)
     port_counter = Counter(str(s["port"]) for s in services if s["port"])
@@ -348,6 +441,7 @@ def build_nmap_data() -> dict:
              "status": r["status"], "ip": r["ip"]}
             for r in findings
         ],
+        "vulns": vulns,
         "summary": {"text": f"Se detectaron {len(assets)} activos, {len(services)} servicios y {len(findings)} hallazgos."},
         "_health": {
             "high_findings":     sev_counter.get("high", 0),
@@ -363,7 +457,7 @@ def refresh_nmap():
             data   = build_nmap_data()
             health = data.pop("_health", {})
             template = (BASE_DIR / "nmap_dashboard.html").read_text(encoding="utf-8")
-            html = template.replace("{{DATA}}", json.dumps(data, ensure_ascii=False, default=str))
+            html = template.replace("{{DATA}}", _embed_json(data))
             (BASE_DIR / "nmap_dashboard_output.html").write_text(html, encoding="utf-8")
             update_status("nmap", "ok", data["kpis"]["assets"], health)
             print(f"[nmap] OK — {data['kpis']['assets']} activos, high={health.get('high_findings',0)} | {now_str()}")
@@ -1742,7 +1836,7 @@ def main():
                 data   = build_nmap_data()
                 health = data.pop("_health", {})
                 template = (BASE_DIR / "nmap_dashboard.html").read_text(encoding="utf-8")
-                html = template.replace("{{DATA}}", json.dumps(data, ensure_ascii=False, default=str))
+                html = template.replace("{{DATA}}", _embed_json(data))
                 (BASE_DIR / "nmap_dashboard_output.html").write_text(html, encoding="utf-8")
                 update_status("nmap", "ok", data["kpis"]["assets"], health)
             elif name == "fortinet_threats":

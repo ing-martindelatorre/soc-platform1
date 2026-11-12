@@ -41,6 +41,20 @@ NMAP_PROFILES: dict[str, list[str]] = {
 }
 
 
+# CVEs reales: vulners (CVE por producto+versión, consulta vulners.com) más
+# los scripts de la categoría vuln que además son "safe" (no intrusivos ni DoS),
+# p. ej. http-slowloris-check, ssl-dh-params, smb-vuln-ms17-010.
+NMAP_PROFILES["cve"] = [
+    "-Pn",
+    "-T4",
+    "-sT",
+    "-sV",
+    "--script", "vulners or (vuln and safe)",
+    "--script-timeout", "5m",
+    "--top-ports", "1000",
+]
+
+
 def get_profile_args(profile_name: str) -> list[str]:
     if profile_name not in NMAP_PROFILES:
         raise ValueError(f"Perfil Nmap no soportado: {profile_name}")

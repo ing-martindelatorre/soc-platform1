@@ -29,7 +29,7 @@ Exceptions: Nmap splits the pipeline across `run_nmap_scan.py`, `parse_nmap_xml.
 **Configurable schedules** — collection frequencies are NOT hardcoded. `app/pipeline/job_config.py::JOB_DEFINITIONS` holds the fixed part (module, kwargs, misfire grace, start offset, defaults); the interval/cron and `enabled` flag live in the `job_config` table. `config_watcher_job` polls that table every 30 s and reschedules/pauses/resumes jobs live. Default schedules:
 - `sentinel_job` every 5 min
 - `fortinet_config_job` every 15 min; `fortinet_logs_job` every 15 min (+7 min offset); `fortinet_threats_job` every 5 min (the FortiGate memory-log buffer rotates fast)
-- `nmap_quick_job` every 360 min (`profile_override="quick"`); `nmap_deep_job` cron `0 2 * * 0` (`full_tcp`)
+- `nmap_quick_job` every 360 min (`profile_override="quick"`); `nmap_deep_job` cron `0 2 * * 0` (`full_tcp`); `nmap_cve_job` cron `0 3 * * 3` (`cve`: vulners + safe vuln scripts → `nmap_vulnerabilities`, cross-checked with CISA KEV and NVD)
 - `snyk_job` cron `0 1 * * *`
 - `cpanel_stats_job` 15 min, `cpanel_security_job` 15 min (+5 offset), `cpanel_accounts_job` 60 min, `cpanel_logs_job` 30 min
 
@@ -67,6 +67,7 @@ pgAdmin is published on `http://localhost:8081` by `docker-compose.yml` (`start_
 python -m app.cli sentinel
 python -m app.cli snyk
 python -m app.cli nmap
+python -m app.cli nmap --profile cve             # CVE scan (vulners + safe vuln scripts)
 python -m app.cli fortinet --mode config|logs   # CLI has no `threats` choice; use run_module('fortinet', mode='threats')
 python -m app.cli cpanel --mode stats|security|accounts|logs
 ```
@@ -116,7 +117,7 @@ Create a `.env` in the project root (never commit it). There is no `.env.example
 
 ## Database Migrations
 
-SQL migrations are in `sql/`, numbered `001_` through `027_`. There is no migration runner: Docker applies them only when the data volume is first created (`./sql` is mounted in `docker-entrypoint-initdb.d`); on an existing database apply new ones manually, in order, via psql or pgAdmin. Make new migrations idempotent and use the next free number. Note: `snyk_scan_runs` and `snyk_account_state` are created at runtime by `ensure_snyk_tables()` in `app/modules/snyk/load.py`, not by a migration.
+SQL migrations are in `sql/`, numbered `001_` through `028_`. There is no migration runner: Docker applies them only when the data volume is first created (`./sql` is mounted in `docker-entrypoint-initdb.d`); on an existing database apply new ones manually, in order, via psql or pgAdmin. Make new migrations idempotent and use the next free number. Note: `snyk_scan_runs` and `snyk_account_state` are created at runtime by `ensure_snyk_tables()` in `app/modules/snyk/load.py`, not by a migration.
 
 ## Gotchas
 

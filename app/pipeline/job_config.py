@@ -63,6 +63,12 @@ JOB_DEFINITIONS: list[dict] = [
         "default_schedule_type": "cron", "default_schedule_value": "0 2 * * 0",
     },
     {
+        "job_id": "nmap_cve_job", "args": ["nmap"], "kwargs": {"profile_override": "cve"},
+        "misfire_grace_time": 600, "start_offset_minutes": 0,
+        "label": "Nmap — CVEs (vulners)",
+        "default_schedule_type": "cron", "default_schedule_value": "0 3 * * 3",
+    },
+    {
         "job_id": "snyk_job", "args": ["snyk"], "kwargs": {},
         "misfire_grace_time": 600, "start_offset_minutes": 0,
         "label": "Snyk",

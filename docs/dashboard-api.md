@@ -17,7 +17,7 @@ HTTP y muestra una advertencia al arrancar.
 |---|---|
 | `index.html` | Portal con tarjetas por módulo y semáforo de salud (lee `soc_status.json`) |
 | `sentinel_dashboard_simple.html` | Incidentes de SentinelOne (lee `sentinel_dashboard_data.json`) |
-| `nmap_dashboard_output.html` | Activos, servicios y hallazgos (generado desde `nmap_dashboard.html`) |
+| `nmap_dashboard_output.html` | Vulnerabilidades reales (CVE, KEV, confirmadas por NSE), activos, servicios y hallazgos de exposición (generado desde `nmap_dashboard.html`) |
 | `fortinet_dashboard_output.html` y `fortinet_dashboard_<equipo>.html` | Configuración y políticas por FortiGate |
 | `fortinet_threats_dashboard.html` | Amenazas: tráfico, eventos, webfilter, IPS, VPN y antivirus (`?device=<equipo>`; 24 h y 7 d) |
 | `snyk_dashboard.html` | Vulnerabilidades por repositorio y aplicación, con descarte. Solo muestra los repos en scope (`ambiente=produccion`, leídos de `repos_snyk_batch.txt`); los hallazgos de repos fuera de scope siguen en BD pero no se muestran. El resumen por proyecto y el detalle por aplicación listan siempre todos los repos en scope con un estado (`con hallazgos`, `limpio` con ceros, `pending` si nunca se ha escaneado, `error`, `sin proyecto soportado`) calculado del último registro en `snyk_scan_runs` |

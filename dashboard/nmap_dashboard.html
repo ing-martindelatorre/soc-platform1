@@ -262,6 +262,35 @@
           margin-bottom: 16px;
         }
 
+        /* CVEs REALES */
+        .cve-section { border-color: rgba(255,77,109,0.35); }
+        .cve-section .panel-title { color: var(--red); }
+        .cve-kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 16px; }
+        .cve-kpis .kpi { padding: 14px; }
+        .cve-kpis .kpi-value { font-size: 28px; }
+        .note {
+          font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted);
+          line-height: 1.6; margin-bottom: 14px;
+        }
+        .note b { color: var(--text); }
+        .det { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+        .det-confirmed { background: rgba(255,77,109,0.15); color: var(--red); }
+        .det-likely    { background: rgba(255,140,66,0.15); color: var(--orange); }
+        .det-version   { background: rgba(74,96,128,0.25);  color: var(--text); }
+        .cve-list { display: flex; flex-wrap: wrap; gap: 4px; }
+        .cve-chip {
+          font-size: 10px; padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border);
+          color: var(--text); text-decoration: none; white-space: nowrap;
+        }
+        .cve-chip:hover { border-color: var(--accent); }
+        .cve-chip.c { border-color: rgba(255,77,109,0.5); color: var(--red); }
+        .cve-chip.h { border-color: rgba(255,140,66,0.5); color: var(--orange); }
+        .cve-chip.k { background: rgba(255,77,109,0.2); border-color: var(--red); color: #fff; font-weight: 700; }
+        .sub-title {
+          font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text);
+          text-transform: uppercase; letter-spacing: 0.08em; margin: 18px 0 10px;
+        }
+
         .empty { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 
         .foot {
@@ -275,6 +304,7 @@
         @media (max-width: 900px) {
           .kpi-grid { grid-template-columns: repeat(2, 1fr); }
           .two-col  { grid-template-columns: 1fr; }
+          .cve-kpis { grid-template-columns: repeat(3, 1fr); }
         }
     </style>
 </head>
@@ -294,6 +324,12 @@
 
     <!-- Summary -->
     <div class="summary-box" id="summary"></div>
+
+    <!-- CVEs reales -->
+    <div class="panel cve-section">
+        <div class="panel-title">Vulnerabilidades reales (CVE)</div>
+        <div id="cve-root"></div>
+    </div>
 
     <!-- Charts row -->
     <div class="two-col">
@@ -400,6 +436,82 @@
 
     // Summary
     document.getElementById('summary').textContent = DATA.summary?.text || '';
+
+    // CVEs reales
+    (function renderVulns() {
+      const root = document.getElementById('cve-root');
+      const V = DATA.vulns || {};
+      if (!V.available) {
+        root.innerHTML = '<span class="empty">Tabla nmap_vulnerabilities no disponible: aplica la migración sql/028_nmap_vulnerabilities.sql.</span>';
+        return;
+      }
+      const k = V.kpis;
+      const kp = [
+        { label: 'CVEs únicos',   value: k.cves,      cls: k.cves ? 'orange' : 'green' },
+        { label: 'Críticos (9+)', value: k.critical,  cls: k.critical ? 'red' : 'green' },
+        { label: 'Explotados (KEV)', value: k.kev,    cls: k.kev ? 'red' : 'green' },
+        { label: 'Confirmadas',   value: k.confirmed, cls: k.confirmed ? 'red' : 'green' },
+        { label: 'Equipos',       value: k.hosts,     cls: '' },
+        { label: 'Resueltas',     value: k.resolved,  cls: 'green' },
+      ];
+      const cvssCls = c => c == null ? '' : c >= 9 ? 'c' : c >= 7 ? 'h' : '';
+      const detLabel = { confirmed: 'Confirmada', likely: 'Probable', version: 'Por versión' };
+      const cveUrl = id => /^CVE-/i.test(id) ? `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(id)}` : '';
+      const safeUrl = u => /^https?:\/\//i.test(u || '') ? u : '';
+      const muted = '<span style="color:var(--muted)">—</span>';
+
+      let html = `<div class="cve-kpis">${kp.map(x => `
+          <div class="kpi ${x.cls}"><div class="kpi-label">${x.label}</div><div class="kpi-value">${x.value}</div></div>`).join('')}
+        </div>
+        <div class="note">
+          Último escaneo de vulnerabilidades: <b>${esc(k.last_scan || 'nunca')}</b> (job <b>nmap_cve_job</b>).<br>
+          <b>KEV</b>: CVE en el catálogo CISA de vulnerabilidades explotadas activamente; son la prioridad #1${k.kev ? ` (afecta a <b>${k.kev_hosts}</b> equipo(s))` : ''}.<br>
+          <b>Confirmada / Probable</b>: un script NSE probó activamente el fallo.
+          <b>Por versión</b>: el banner coincide con una versión con CVEs publicados (vulners); no se probó.
+          Puede ser falso positivo si la distribución aplica parches sin cambiar la versión (RHEL/CentOS/cPanel); validar con el changelog del paquete.
+        </div>`;
+
+      // Confirmadas
+      html += '<div class="sub-title">Confirmadas por escaneo activo</div>';
+      if (!V.confirmed.length) {
+        html += '<div class="empty">Ninguna vulnerabilidad confirmada abierta.</div>';
+      } else {
+        html += `<div class="table-wrap"><table><thead><tr>
+            <th>Detección</th><th>Equipo</th><th>Puerto</th><th>ID</th><th>Vulnerabilidad</th><th>Servicio</th><th>Visto desde</th>
+          </tr></thead><tbody>${V.confirmed.map(v => {
+            const url = cveUrl(v.vuln_id) || safeUrl(v.reference_url);
+            const id = url ? `<a class="cve-chip ${cvssCls(v.cvss)}" href="${esc(url)}" target="_blank" rel="noopener">${esc(v.vuln_id)}</a>` : esc(v.vuln_id);
+            return `<tr>
+              <td><span class="det det-${esc(v.detection)}">${detLabel[v.detection] || esc(v.detection)}</span></td>
+              <td>${esc(v.ip)}<br><span style="color:var(--muted);font-size:11px">${esc(v.hostname)}</span></td>
+              <td style="color:var(--accent)">${v.port ? v.port + '/' + esc(v.protocol) : 'host'}</td>
+              <td>${id}${v.in_kev ? ' <span class="det det-confirmed" title="CISA KEV">KEV</span>' : ''}</td>
+              <td>${esc(v.title)}<br><span style="color:var(--muted);font-size:11px">${esc(v.script_name)}</span></td>
+              <td>${esc(v.product) || muted} ${esc(v.version)}</td>
+              <td>${esc(v.first_seen)}</td>
+            </tr>`; }).join('')}</tbody></table></div>`;
+      }
+
+      // Por versión, agrupado por servicio
+      html += '<div class="sub-title">CVEs por versión del servicio (vulners)</div>';
+      if (!V.by_service.length) {
+        html += '<div class="empty">Sin CVEs por versión abiertos.</div>';
+      } else {
+        html += `<div class="table-wrap"><table><thead><tr>
+            <th>CVSS máx</th><th>Equipo</th><th>Puerto</th><th>Servicio</th><th>CVEs</th><th>Crít / Alto</th><th>KEV</th><th>Principales CVEs</th>
+          </tr></thead><tbody>${V.by_service.map(s => `<tr>
+              <td><span class="sev ${sevClass(s.max_cvss >= 9 ? 'critical' : s.max_cvss >= 7 ? 'high' : s.max_cvss >= 4 ? 'medium' : 'low')}">${s.max_cvss ?? '—'}</span></td>
+              <td>${esc(s.ip)}<br><span style="color:var(--muted);font-size:11px">${esc(s.hostname)}</span></td>
+              <td style="color:var(--accent)">${s.port}/${esc(s.protocol)}</td>
+              <td>${esc(s.product) || muted} ${esc(s.version)}</td>
+              <td>${s.total}</td>
+              <td><span style="color:var(--red)">${s.critical}</span> / <span style="color:var(--orange)">${s.high}</span></td>
+              <td style="color:${s.kev ? 'var(--red)' : 'var(--muted)'}">${s.kev}${s.ransomware ? ' <span title="Usado en campañas de ransomware">☠</span>' : ''}</td>
+              <td><div class="cve-list">${s.top.map(c => `<a class="cve-chip ${c.kev ? 'k' : cvssCls(c.cvss)}" href="${esc(cveUrl(c.id))}" target="_blank" rel="noopener" title="CVSS ${c.cvss ?? '?'}${c.kev ? ' · explotado activamente (CISA KEV)' : ''}">${c.kev ? '⚡ ' : ''}${esc(c.id)}${c.cvss != null ? ' ' + c.cvss : ''}</a>`).join('')}</div></td>
+            </tr>`).join('')}</tbody></table></div>`;
+      }
+      root.innerHTML = html;
+    })();
 
     // Bars
     renderBars('ports-bars', DATA.ports || {}, 'var(--accent)');

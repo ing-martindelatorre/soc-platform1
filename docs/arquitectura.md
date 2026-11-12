@@ -84,6 +84,7 @@ de configuración.
 | `fortinet_threats_job` | `fortinet` modo `threats` | cada 5 min |
 | `nmap_quick_job` | `nmap` perfil `quick` | cada 360 min (6 h) |
 | `nmap_deep_job` | `nmap` perfil `full_tcp` | cron `0 2 * * 0` (domingos 2:00) |
+| `nmap_cve_job` | `nmap` perfil `cve` | cron `0 3 * * 3` (miércoles 3:00) |
 | `snyk_job` | `snyk` | cron `0 1 * * *` (diario 1:00) |
 | `cpanel_stats_job` | `cpanel` modo `stats` | cada 15 min |
 | `cpanel_security_job` | `cpanel` modo `security` | cada 15 min, desfase de +5 min |

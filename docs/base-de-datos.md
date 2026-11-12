@@ -43,6 +43,7 @@ idempotente.
 | 025 | Reconstruye `job_config` con los `job_id` reales del scheduler |
 | 026 | `replication_targets`, `replication_watermarks` (replicación remota) |
 | 027 | `executive_report_config`, `executive_reports`, `executive_report_sends` (reportes ejecutivos mensuales) |
+| 028 | `nmap_vulnerabilities` (CVEs reales y vulnerabilidades confirmadas por NSE) |
 
 ## Tablas por dominio
 
@@ -74,7 +75,15 @@ idempotente.
 `nmap_assets` (IP única, hostname, sistema operativo), `nmap_services`
 (`asset_id`, `port`, `protocol`, producto y versión) y `nmap_findings`
 (severidad, título, recomendación, categoría, evidencia JSONB). Borrar un
-activo elimina en cascada sus servicios y hallazgos.
+activo elimina en cascada sus servicios, hallazgos y vulnerabilidades.
+
+`nmap_vulnerabilities` (migración 028) guarda las vulnerabilidades reales, una
+fila por `(asset_id, port, protocol, vuln_id)` (`port = 0` para scripts a
+nivel host): `vuln_id` (CVE o `<script>:<id>` si no hay CVE), `cvss`,
+`severity`, `detection` (`confirmed` | `likely` | `version`), `in_kev`,
+`kev_ransomware`, `nvd_affected`, producto/versión/CPE, `status`
+(`open` | `resolved`), `first_seen`, `last_seen`, `resolved_at`. No tiene
+retención propia: se borra en cascada con el activo.
 
 ### Fortinet
 
